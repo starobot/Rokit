@@ -11,8 +11,4 @@ public interface EventListener<E> {
         return null;
     }
 
-    default int getPriority() {
-        return DEFAULT_LISTENER_PRIORITY;
-    }
-
 }
