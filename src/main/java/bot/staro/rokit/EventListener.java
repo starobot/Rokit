@@ -1,8 +1,6 @@
 package bot.staro.rokit;
 
 public interface EventListener<E> {
-    int DEFAULT_LISTENER_PRIORITY = 0;
-
     void invoke(E event);
 
     Class<E> getType();
