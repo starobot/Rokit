@@ -1,27 +1,32 @@
-import bot.staro.rokit.EventBus;
-import bot.staro.rokit.EventListener;
-import bot.staro.rokit.impl.EventBusImpl;
-import bot.staro.rokit.impl.Listener;
-import bot.staro.rokit.impl.Subscriber;
+import bot.staro.rokit.classic.EventBus;
+import bot.staro.rokit.classic.Listener;
+import bot.staro.rokit.classic.impl.FunctionalEventBus;
+import bot.staro.rokit.classic.impl.ImperativeEventBus;
 
 public class Test {
     public static void main(String[] args) {
-        EventBus eventBus = new EventBusImpl();
-        eventBus.subscribe(new TestSubscriber());
+        EventBus funcBus = new FunctionalEventBus();
+        funcBus.subscribe(new TestSubscriber());
         var timer = System.currentTimeMillis();
-        for (int i = 0; i <= 1000000; i++) eventBus.post(new Event());
-        System.out.println(System.currentTimeMillis() - timer);
-    }
-
-    public static class TestSubscriber extends Subscriber {
-        public TestSubscriber() {
-            EventListener<Event> listener = Listener.<Event>builder()
-                    .withType(Event.class)
-                    .withConsumer(this::onEvent)
-                    .build();
-            addListener(listener);
+        for (int i = 0; i <= 1000000; i++) {
+            funcBus.post(new Event());
         }
 
+        System.out.println(System.currentTimeMillis() - timer);
+
+        EventBus imperBus = new ImperativeEventBus();
+        imperBus.subscribe(new TestSubscriber());
+        var t = System.currentTimeMillis();
+        for (int i = 0; i <= 1000000; i++) {
+            imperBus.post(new Event());
+        }
+
+        System.out.println(System.currentTimeMillis() - t);
+
+    }
+
+    public static class TestSubscriber{
+        @Listener
         public void onEvent(Event event) {
         }
 
