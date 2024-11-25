@@ -1,5 +1,7 @@
 # ROKIT
 
+[![CodeFactor](https://www.codefactor.io/repository/github/starobot/rokit/badge)](https://www.codefactor.io/repository/github/starobot/rokit)
+
 ### A fast, efficient and flexible event system for java 21.
 Here my goal was to rework [StaroEventSystem](https://github.com/starobot/StaroEventSystem) entirely, make it more flexible, declarative, without the loss of performance at the end.
 
