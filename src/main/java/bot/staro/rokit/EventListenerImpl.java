@@ -1,6 +1,4 @@
-package bot.staro.rokit.impl;
-
-import bot.staro.rokit.EventListener;
+package bot.staro.rokit;
 
 import java.lang.invoke.LambdaMetafactory;
 import java.lang.invoke.MethodHandle;
