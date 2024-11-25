@@ -3,6 +3,10 @@ package bot.staro.rokit;
 import static java.lang.Integer.MAX_VALUE;
 import static java.lang.Integer.MIN_VALUE;
 
+/**
+ * Enum representing various priority levels for event listeners.
+ * Determines the order in which listeners are executed.
+ */
 public enum Priority {
     MAX(MAX_VALUE),
     HIGH(3),

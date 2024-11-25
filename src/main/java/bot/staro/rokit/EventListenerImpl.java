@@ -7,6 +7,12 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.util.function.Consumer;
 
+/**
+ * Implementation of {@link EventListener} that uses a reflective method invocation.
+ * Utilizes lambda metafactories for a fast method lookup.
+ * Supports private methods.
+ * IMPORTANT: the events containing more than one argument will not receive the dispatched events.
+ */
 public class EventListenerImpl implements EventListener {
     private final Object instance;
     private final Method method;
