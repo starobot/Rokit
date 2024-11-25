@@ -5,11 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="14c5c14b-9cbe-4d61-8402-355bd64d9d6a" name="Changes" comment="refactor">
+      <change afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/EventWrapper.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/annotation/TypeHandler.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/impl/BiEventConsumer.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/EventBus.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/EventBus.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/impl/EventListenerImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/EventListenerImpl.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/impl/FunctionalEventBus.java" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/impl/ImperativeEventBus.java" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/EventListener.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/EventConsumer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/EventListenerImpl.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/impl/EventConsumerImpl.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/Listener.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/bot/staro/rokit/annotation/Listener.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/test/java/Test.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/test/java/Test.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -26,8 +29,9 @@
     <option name="RECENT_TEMPLATES">
       <list>
         <option value="Enum" />
-        <option value="Interface" />
         <option value="Class" />
+        <option value="AnnotationType" />
+        <option value="Interface" />
       </list>
     </option>
   </component>
@@ -57,6 +61,8 @@
   </component>
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
+    &quot;Application.Test.executor&quot;: &quot;Debug&quot;,
+    &quot;Gradle.Build Rokit.executor&quot;: &quot;Run&quot;,
     &quot;Gradle.Rokit [:Test.main()].executor&quot;: &quot;Debug&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
@@ -76,8 +82,10 @@
   </component>
   <component name="RunManager">
     <configuration name="Test" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
+      <option name="ALTERNATIVE_JRE_PATH" value="21" />
+      <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
       <option name="MAIN_CLASS_NAME" value="Test" />
-      <module name="Rokit.test" />
+      <module name="rokit.test" />
       <method v="2">
         <option name="Make" enabled="true" />
       </method>

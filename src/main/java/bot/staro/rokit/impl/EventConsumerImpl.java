@@ -1,4 +1,6 @@
-package bot.staro.rokit;
+package bot.staro.rokit.impl;
+
+import bot.staro.rokit.EventConsumer;
 
 import java.lang.invoke.LambdaMetafactory;
 import java.lang.invoke.MethodHandle;
@@ -8,18 +10,18 @@ import java.lang.reflect.Method;
 import java.util.function.Consumer;
 
 /**
- * Implementation of {@link EventListener} that uses a reflective method invocation.
+ * Implementation of {@link EventConsumer} that uses a reflective method invocation.
  * Utilizes lambda metafactories for a fast method lookup.
  * Supports private methods.
  * IMPORTANT: the events containing more than one argument will not receive the dispatched events.
  */
-public class EventListenerImpl implements EventListener {
+public class EventConsumerImpl implements EventConsumer {
     private final Object instance;
     private final Method method;
     private final int priority;
     private final Consumer<Object> consumer;
 
-    public EventListenerImpl(Object instance, Method method, int priority) {
+    public EventConsumerImpl(Object instance, Method method, int priority) {
         this.instance = instance;
         this.method = method;
         this.priority = priority;

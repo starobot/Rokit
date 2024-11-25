@@ -6,7 +6,7 @@ import java.lang.reflect.Method;
  * Represents an event listener associated with a method.
  * Encapsulates the logic for invoking the method and storing its metadata.
  */
-public interface EventListener {
+public interface EventConsumer {
     /**
      * Invokes the listener with the given event upon the event dispatching in {@link EventBus}
      *

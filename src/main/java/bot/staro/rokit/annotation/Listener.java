@@ -1,4 +1,7 @@
-package bot.staro.rokit;
+package bot.staro.rokit.annotation;
+
+import bot.staro.rokit.EventBus;
+import bot.staro.rokit.Priority;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

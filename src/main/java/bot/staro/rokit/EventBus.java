@@ -1,5 +1,10 @@
 package bot.staro.rokit;
 
+import bot.staro.rokit.annotation.Listener;
+import bot.staro.rokit.annotation.TypeHandler;
+import bot.staro.rokit.impl.BiEventConsumer;
+import bot.staro.rokit.impl.EventConsumerImpl;
+
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.util.*;
@@ -15,11 +20,11 @@ import java.util.stream.Stream;
  *                                                BiFunction<Object, Method, EventListener> factory)}.
  */
 public class EventBus {
-    private final Map<Class<?>, List<EventListener>> listeners = new ConcurrentHashMap<>();
+    private final Map<Class<?>, List<EventConsumer>> listeners = new ConcurrentHashMap<>();
     private final Map<Object, Set<Class<?>>> subscriptions = new ConcurrentHashMap<>();
-    private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventListener>> listenerFactories = new HashMap<>();
+    private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> listenerFactories = new HashMap<>();
 
-    private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventListener>> factories) {
+    private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories) {
         this.listenerFactories.putAll(factories);
     }
 
@@ -49,12 +54,12 @@ public class EventBus {
                             .findFirst().orElse(null);
                     if (annotation != null) {
                         Class<?> eventType = method.getParameterTypes()[0];
-                        BiFunction<Object, Method, EventListener> factory = listenerFactories.get(annotation.annotationType());
-                        EventListener listener = factory.apply(subscriber, method);
+                        BiFunction<Object, Method, EventConsumer> factory = listenerFactories.get(annotation.annotationType());
+                        EventConsumer listener = factory.apply(subscriber, method);
                         listeners.compute(eventType, (key, currentList) -> currentList == null ?
                                 List.of(listener) :
                                 Stream.concat(currentList.stream(), Stream.of(listener))
-                                        .sorted(Comparator.comparingInt(EventListener::getPriority).reversed())
+                                        .sorted(Comparator.comparingInt(EventConsumer::getPriority).reversed())
                                         .toList());
                         subscriptions.computeIfAbsent(subscriber, k -> new HashSet<>()).add(eventType);
                     }
@@ -88,7 +93,7 @@ public class EventBus {
 
     private List<Method> getListeningMethods(Class<?> clazz) {
         return Arrays.stream(clazz.getDeclaredMethods())
-                .filter(method -> method.getParameterCount() == 1 &&
+                .filter(method -> /*method.getParameterCount() == 1 &&*/
                         Arrays.stream(method.getAnnotations())
                                 .anyMatch(annotation -> listenerFactories.containsKey(annotation.annotationType())))
                 .collect(Collectors.toList());
@@ -108,11 +113,16 @@ public class EventBus {
      * Supports adding custom listener factories before building the EventBus.
      */
     public static class Builder {
-        private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventListener>> factories = new HashMap<>();
+        private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories = new HashMap<>();
 
         public Builder() {
-            factories.put(Listener.class, (instance, method) ->
-                    new EventListenerImpl(instance, method, method.getAnnotation(Listener.class).priority().getVal()));
+            factories.put(Listener.class, (instance, method) -> {
+                if (method.getAnnotation(TypeHandler.class) != null) {
+                    return new BiEventConsumer(instance, method, method.getAnnotation(Listener.class).priority().getVal());
+                }
+
+                return new EventConsumerImpl(instance, method, method.getAnnotation(Listener.class).priority().getVal());
+            });
         }
 
         /**
@@ -123,7 +133,7 @@ public class EventBus {
          * @param factory        the factory function to create listeners.
          */
         public Builder registerListenerFactory(Class<? extends Annotation> annotationType,
-                                               BiFunction<Object, Method, EventListener> factory) {
+                                               BiFunction<Object, Method, EventConsumer> factory) {
             factories.put(annotationType, factory);
             return this;
         }
