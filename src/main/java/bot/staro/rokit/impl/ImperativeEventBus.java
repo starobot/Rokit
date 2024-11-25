@@ -1,8 +1,8 @@
-package bot.staro.rokit.classic.impl;
+package bot.staro.rokit.impl;
 
-import bot.staro.rokit.classic.EventBus;
-import bot.staro.rokit.classic.EventListener;
-import bot.staro.rokit.classic.Listener;
+import bot.staro.rokit.EventBus;
+import bot.staro.rokit.EventListener;
+import bot.staro.rokit.Listener;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;

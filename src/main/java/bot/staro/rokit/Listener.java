@@ -1,4 +1,4 @@
-package bot.staro.rokit.classic;
+package bot.staro.rokit;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

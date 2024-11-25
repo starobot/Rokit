@@ -1,7 +1,7 @@
-import bot.staro.rokit.classic.EventBus;
-import bot.staro.rokit.classic.Listener;
-import bot.staro.rokit.classic.impl.FunctionalEventBus;
-import bot.staro.rokit.classic.impl.ImperativeEventBus;
+import bot.staro.rokit.EventBus;
+import bot.staro.rokit.Listener;
+import bot.staro.rokit.impl.FunctionalEventBus;
+import bot.staro.rokit.impl.ImperativeEventBus;
 
 public class Test {
     public static void main(String[] args) {

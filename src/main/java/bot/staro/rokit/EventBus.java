@@ -1,4 +1,4 @@
-package bot.staro.rokit.classic;
+package bot.staro.rokit;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
