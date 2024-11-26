@@ -7,6 +7,7 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
@@ -65,6 +66,25 @@ public class EventConsumerImpl implements EventConsumer {
     @Override
     public int getPriority() {
         return priority;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+
+        EventConsumer that = (EventConsumer) obj;
+        return getInstance().equals(that.getInstance()) && getMethod().equals(that.getMethod());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(getInstance(), getMethod());
     }
 
 }

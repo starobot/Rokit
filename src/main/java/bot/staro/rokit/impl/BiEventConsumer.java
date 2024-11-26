@@ -91,4 +91,23 @@ public class BiEventConsumer implements EventConsumer {
                 .newInstance();
     }
 
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+
+        EventConsumer that = (EventConsumer) obj;
+        return getInstance().equals(that.getInstance()) && getMethod().equals(that.getMethod());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(getInstance(), getMethod());
+    }
+
 }

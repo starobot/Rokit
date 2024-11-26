@@ -74,10 +74,11 @@ public class EventBus {
     public void unsubscribe(Object subscriber) {
         getListeningMethods(subscriber.getClass()).forEach(method -> {
             Class<?> eventType = method.getParameterTypes()[0];
-            listeners.computeIfPresent(eventType, (k, v) -> v.stream()
-                    .filter(listener -> !listener.equals(subscriber))
+            listeners.computeIfPresent(eventType, (k, list) -> list.stream()
+                    .filter(listener -> !listener.getInstance().equals(subscriber))
                     .collect(Collectors.toList()));
         });
+
         subscriptions.remove(subscriber);
     }
 
