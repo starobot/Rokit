@@ -4,11 +4,6 @@
 
 ### A fast, efficient and flexible event system for java 21.
 Here my goal was to rework [StaroEventSystem](https://github.com/starobot/StaroEventSystem) entirely, make it more flexible, declarative, without the loss of performance at the end.
-
-Rokit is not yet finished. Right now the system has it's limitations which are:
-1. The amount of arguments within the listener cannot be more than 1 (The only argument is the event to be dispatched by the event bus).
-2. No static support.
-
 As of now, I believe, Rokit is a great replacement for [StaroEventSystem](https://github.com/starobot/StaroEventSystem), since java 21 improved streams performance and introduced new tools, 
 which are suitable to write fast, efficient and easy to understand declarative code.
 
