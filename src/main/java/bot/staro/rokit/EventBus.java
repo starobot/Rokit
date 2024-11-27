@@ -72,12 +72,13 @@ public class EventBus {
      * @param subscriber is an object containing listener methods.
      */
     public void unsubscribe(Object subscriber) {
-        getListeningMethods(subscriber.getClass()).forEach(method -> {
+        List<Method> methods = getListeningMethods(subscriber.getClass());
+        for (Method method : methods) {
             Class<?> eventType = method.getParameterTypes()[0];
             listeners.computeIfPresent(eventType, (k, list) -> list.stream()
                     .filter(listener -> !listener.getInstance().equals(subscriber))
                     .collect(Collectors.toList()));
-        });
+        }
 
         subscriptions.remove(subscriber);
     }
