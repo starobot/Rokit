@@ -1,13 +1,13 @@
-import bot.staro.rokit.EventWrapper;
 import bot.staro.rokit.annotation.Listener;
 import bot.staro.rokit.EventBus;
-import bot.staro.rokit.annotation.TypeHandler;
 
 public class Test {
     public static void main(String[] args) {
-        EventBus eventBus = EventBus.builder().build();
+        EventBus eventBus = EventBus.builder()
+                .wrap(Event.class, event -> event.something)
+                .build();
         eventBus.subscribe(new TestSubscriber());
-        eventBus.post(new Event<>("1"));
+        eventBus.post(new Event<>(1));
 
         // Functional event bus benchmark
         eventBus.subscribe(new BenchmarkListener());
@@ -29,7 +29,6 @@ public class Test {
 
     public static class TestSubscriber {
 
-        @TypeHandler(EventWrapperImpl.class)
         @Listener
         public void onEvent(Event<?> event, String string) {
             System.out.println("1");
@@ -42,17 +41,6 @@ public class Test {
 
         public Event(T something) {
             this.something = something;
-        }
-    }
-
-    public static final class EventWrapperImpl implements EventWrapper {
-        @Override
-        public Object handle(Object event) {
-            if (event instanceof Event<?> e) {
-                return e.something;
-            }
-
-            return null;
         }
     }
 
