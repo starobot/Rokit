@@ -2,15 +2,12 @@ package bot.staro.rokit.impl;
 
 import bot.staro.rokit.EventConsumer;
 import bot.staro.rokit.EventWrapper;
-import bot.staro.rokit.annotation.TypeHandler;
 
 import java.lang.invoke.LambdaMetafactory;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 
@@ -20,23 +17,15 @@ public class BiEventConsumer implements EventConsumer {
     private final int priority;
     private final BiConsumer<Object, Object> consumer;
     private final Class<?> type;
-    private final EventWrapper eventHandler;
+    private final EventWrapper<?> eventWrapper;
 
-    public BiEventConsumer(Object instance, Method method, int priority) {
+    public BiEventConsumer(Object instance, Method method, int priority, EventWrapper<?> eventHandler) {
         this.instance = instance;
         this.method = method;
         this.priority = priority;
         this.consumer = createConsumer();
         this.type = method.getParameterTypes()[1];
-        if (method.getAnnotation(TypeHandler.class) == null) {
-            throw new RuntimeException();
-        }
-
-        try {
-            eventHandler = getWrapperInstance(method);
-        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            throw new RuntimeException(e);
-        }
+        this.eventWrapper = eventHandler;
     }
 
     @SuppressWarnings("unchecked")
@@ -60,7 +49,7 @@ public class BiEventConsumer implements EventConsumer {
 
     @Override
     public void invoke(Object event) {
-        Object extra = eventHandler.handle(event);
+        Object extra = eventWrapper.invoke(event);
         if (extra.getClass() != type) {
             return;
         }
@@ -81,14 +70,6 @@ public class BiEventConsumer implements EventConsumer {
     @Override
     public int getPriority() {
         return priority;
-    }
-
-    private static EventWrapper getWrapperInstance(Method method) throws InvocationTargetException, InstantiationException, IllegalAccessException {
-        var wrapper = method.getAnnotation(TypeHandler.class).value();
-        return (EventWrapper) Objects.requireNonNull(Arrays.stream(wrapper.getConstructors())
-                        .filter(constructor -> constructor.getParameterCount() == 0)
-                        .findFirst().orElse(null))
-                .newInstance();
     }
 
     @Override

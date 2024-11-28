@@ -1,12 +1,12 @@
 package bot.staro.rokit;
 
 import bot.staro.rokit.annotation.Listener;
-import bot.staro.rokit.annotation.TypeHandler;
 import bot.staro.rokit.impl.BiEventConsumer;
 import bot.staro.rokit.impl.EventConsumerImpl;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
@@ -20,12 +20,25 @@ import java.util.stream.Stream;
  *                                                BiFunction<Object, Method, EventListener> factory)}.
  */
 public class EventBus {
+    private final Map<Class<?>, EventWrapper<?>> eventWrappers = new HashMap<>();
+
     private final Map<Class<?>, List<EventConsumer>> listeners = new ConcurrentHashMap<>();
     private final Map<Object, Set<Class<?>>> subscriptions = new ConcurrentHashMap<>();
     private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> listenerFactories = new HashMap<>();
 
-    private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories) {
+    private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories,
+                     Map<Class<?>, EventWrapper<?>> eventWrappers) {
+        this.listenerFactories.put(Listener.class, (instance, method) -> {
+            var priority = method.getAnnotation(Listener.class).priority().getVal();
+            var wrapper = getWrapper(method);
+            if (wrapper != null) {
+                return new BiEventConsumer(instance, method, priority, wrapper);
+            }
+
+            return new EventConsumerImpl(instance, method, priority);
+        });
         this.listenerFactories.putAll(factories);
+        this.eventWrappers.putAll(eventWrappers);
     }
 
     /**
@@ -102,6 +115,19 @@ public class EventBus {
     }
 
     /**
+     * Returns an {@link EventWrapper} for targeting method
+     *
+     * @param method search target
+     * @return {@link EventWrapper} instance or {@code null} if wrapper not found
+     */
+    private EventWrapper<?> getWrapper(Method method) {
+        Parameter[] p = method.getParameters();
+        if (p.length < 2) return null;
+        Class<?> type = p[0].getType();
+        return eventWrappers.get(type);
+    }
+
+    /**
      * Creates a builder for constructing an EventBus with custom factories.
      *
      * @return a new {@link Builder} instance.
@@ -116,16 +142,7 @@ public class EventBus {
      */
     public static class Builder {
         private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories = new HashMap<>();
-
-        public Builder() {
-            factories.put(Listener.class, (instance, method) -> {
-                if (method.getAnnotation(TypeHandler.class) != null) {
-                    return new BiEventConsumer(instance, method, method.getAnnotation(Listener.class).priority().getVal());
-                }
-
-                return new EventConsumerImpl(instance, method, method.getAnnotation(Listener.class).priority().getVal());
-            });
-        }
+        private final Map<Class<?>, EventWrapper<?>> eventWrappers = new HashMap<>();
 
         /**
          * Registers a custom listener factory for a specific annotation type.
@@ -140,13 +157,18 @@ public class EventBus {
             return this;
         }
 
+        public <T> Builder wrap(Class<T> k, EventWrapper<? super T> wrapper) {
+            eventWrappers.put(k, wrapper);
+            return this;
+        }
+
         /**
          * Builds a new EventBus object.
          *
          * @return new EventBus instance.
          */
         public EventBus build() {
-            return new EventBus(factories);
+            return new EventBus(factories, eventWrappers);
         }
     }
 
