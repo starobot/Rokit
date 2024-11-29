@@ -27,7 +27,7 @@ public class EventBus {
     private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories,
                      Map<Class<?>, EventWrapper<?>> eventWrappers) {
         this.listenerFactories.put(Listener.class, (instance, method) -> {
-            int priority = method.getAnnotation(Listener.class).priority().getVal();
+            var priority = method.getAnnotation(Listener.class).priority().getVal();
             var wrapper = getWrapper(method);
             if (wrapper != null) {
                 return new BiEventConsumer(instance, method, priority, wrapper);
