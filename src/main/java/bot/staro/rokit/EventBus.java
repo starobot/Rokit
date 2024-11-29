@@ -11,7 +11,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * The central bus for dispatching (posting) events and managing subscribers (listeners).
@@ -20,24 +19,25 @@ import java.util.stream.Stream;
  *                                                BiFunction<Object, Method, EventListener> factory)}.
  */
 public class EventBus {
-    private final Map<Class<?>, EventWrapper<?>> eventWrappers = new HashMap<>();
-
     private final Map<Class<?>, List<EventConsumer>> listeners = new ConcurrentHashMap<>();
     private final Map<Object, Set<Class<?>>> subscriptions = new ConcurrentHashMap<>();
     private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> listenerFactories = new HashMap<>();
+    private final Map<Class<?>, EventWrapper<?>> eventWrappers = new HashMap<>();
 
     private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories,
                      Map<Class<?>, EventWrapper<?>> eventWrappers) {
         this.listenerFactories.put(Listener.class, (instance, method) -> {
-            var priority = method.getAnnotation(Listener.class).priority().getVal();
-            var wrapper = getWrapper(method);
+            int priority = method.getAnnotation(Listener.class).priority().getVal();
+            EventWrapper<?> wrapper = getWrapper(method);
             if (wrapper != null) {
                 return new BiEventConsumer(instance, method, priority, wrapper);
             }
 
             return new EventConsumerImpl(instance, method, priority);
         });
+
         this.listenerFactories.putAll(factories);
+
         this.eventWrappers.putAll(eventWrappers);
     }
 
@@ -47,8 +47,12 @@ public class EventBus {
      * @param event is the object to dispatch.
      */
     public void post(Object event) {
-        listeners.getOrDefault(event.getClass(), Collections.emptyList())
-                .forEach(listener -> listener.invoke(event));
+        List<EventConsumer> consumers = listeners.getOrDefault(event.getClass(), Collections.emptyList());
+        if (consumers != null) {
+            for (EventConsumer consumer : consumers) {
+                consumer.invoke(event);
+            }
+        }
     }
 
     /**
@@ -58,25 +62,35 @@ public class EventBus {
      * @param subscriber is an object containing listener methods.
      */
     public void subscribe(Object subscriber) {
-        getListeningMethods(subscriber.getClass()).stream()
-                .filter(method -> Arrays.stream(method.getAnnotations())
-                        .anyMatch(a -> listenerFactories.containsKey(a.annotationType())))
-                .forEach(method -> {
-                    Annotation annotation = Arrays.stream(method.getAnnotations())
-                            .filter(a -> listenerFactories.containsKey(a.annotationType()))
-                            .findFirst().orElse(null);
-                    if (annotation != null) {
-                        Class<?> eventType = method.getParameterTypes()[0];
-                        BiFunction<Object, Method, EventConsumer> factory = listenerFactories.get(annotation.annotationType());
-                        EventConsumer listener = factory.apply(subscriber, method);
-                        listeners.compute(eventType, (key, currentList) -> currentList == null ?
-                                List.of(listener) :
-                                Stream.concat(currentList.stream(), Stream.of(listener))
-                                        .sorted(Comparator.comparingInt(EventConsumer::getPriority).reversed())
-                                        .toList());
-                        subscriptions.computeIfAbsent(subscriber, k -> new HashSet<>()).add(eventType);
+        List<Method> methods = getListeningMethods(subscriber.getClass());
+        for (Method method : methods) {
+            Annotation[] annotations = method.getAnnotations();
+            Annotation targetAnnotation = null;
+            for (Annotation annotation : annotations) {
+                if (listenerFactories.containsKey(annotation.annotationType())) {
+                    targetAnnotation = annotation;
+                    break;
+                }
+            }
+
+            if (targetAnnotation != null) {
+                Class<?> eventType = method.getParameterTypes()[0];
+                BiFunction<Object, Method, EventConsumer> factory = listenerFactories.get(targetAnnotation.annotationType());
+                EventConsumer listener = factory.apply(subscriber, method);
+                listeners.compute(eventType, (key, currentList) -> {
+                    if (currentList == null) {
+                        return List.of(listener);
                     }
+
+                    List<EventConsumer> newList = new ArrayList<>(currentList);
+                    newList.add(listener);
+                    newList.sort(Comparator.comparingInt(EventConsumer::getPriority).reversed());
+                    return newList;
                 });
+
+                subscriptions.computeIfAbsent(subscriber, k -> new HashSet<>()).add(eventType);
+            }
+        }
     }
 
     /**
@@ -122,7 +136,10 @@ public class EventBus {
      */
     private EventWrapper<?> getWrapper(Method method) {
         Parameter[] p = method.getParameters();
-        if (p.length < 2) return null;
+        if (p.length < 2) {
+            return null;
+        }
+
         Class<?> type = p[0].getType();
         return eventWrappers.get(type);
     }
@@ -157,16 +174,8 @@ public class EventBus {
             return this;
         }
 
-        /**
-         * Define the data dispatched generic the generic data type class.
-         *
-         * @param eventClass is the event class of the generic event.
-         * @param wrapper is a function that takes an event and provides a generic T value.
-         * @return T value.
-         * @param <T> is a generic data type.
-         */
-        public <T> Builder wrap(Class<T> eventClass, EventWrapper<? super T> wrapper) {
-            eventWrappers.put(eventClass, wrapper);
+        public <T> Builder wrap(Class<T> k, EventWrapper<? super T> wrapper) {
+            eventWrappers.put(k, wrapper);
             return this;
         }
 
