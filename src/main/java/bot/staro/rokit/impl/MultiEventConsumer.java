@@ -1,7 +1,7 @@
 package bot.staro.rokit.impl;
 
 import bot.staro.rokit.EventConsumer;
-import bot.staro.rokit.EventWrapper;
+import bot.staro.rokit.function.EventWrapper;
 import bot.staro.rokit.utils.ReflectionUtil;
 
 import java.lang.invoke.LambdaMetafactory;
@@ -64,7 +64,7 @@ public class MultiEventConsumer implements EventConsumer {
         }
 
         if (extra.length == 1) {
-            consumer.accept(event, extra);
+            consumer.accept(event, extra[0]);
         } else {
             try {
                 method.invoke(instance, add(extra, event));
