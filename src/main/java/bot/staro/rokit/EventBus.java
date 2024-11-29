@@ -1,6 +1,8 @@
 package bot.staro.rokit;
 
 import bot.staro.rokit.annotation.Listener;
+import bot.staro.rokit.function.EventWrapper;
+import bot.staro.rokit.function.SingleEventWrapper;
 import bot.staro.rokit.impl.MultiEventConsumer;
 import bot.staro.rokit.impl.EventConsumerImpl;
 
@@ -175,6 +177,11 @@ public class EventBus {
         }
 
         public <T> Builder wrap(Class<T> k, EventWrapper<? super T> wrapper) {
+            eventWrappers.put(k, wrapper);
+            return this;
+        }
+
+        public <T> Builder wrapSingle(Class<T> k, SingleEventWrapper<? super T> wrapper) {
             eventWrappers.put(k, wrapper);
             return this;
         }

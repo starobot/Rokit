@@ -1,4 +1,4 @@
-package bot.staro.rokit;
+package bot.staro.rokit.function;
 
 /**
  * A functional interface representing a wrapper for handling events of type {@code T}.
