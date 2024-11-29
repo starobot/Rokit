@@ -32,4 +32,5 @@ public interface EventWrapper<T> {
     default Object invoke(Object o) {
         return handle((T) o);
     }
+
 }

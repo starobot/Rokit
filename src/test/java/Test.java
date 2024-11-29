@@ -1,5 +1,5 @@
-import bot.staro.rokit.annotation.Listener;
 import bot.staro.rokit.EventBus;
+import bot.staro.rokit.annotation.Listener;
 
 public class Test {
     public static void main(String[] args) {
@@ -7,10 +7,10 @@ public class Test {
                 .wrap(Event.class, event -> event.something)
                 .build();
         eventBus.subscribe(new TestSubscriber());
-        eventBus.post(new Event<>(1));
+        eventBus.post(new Event<>("1"));
 
         // Functional event bus benchmark
-        eventBus.subscribe(new BenchmarkListener());
+        //eventBus.subscribe(new BenchmarkListener());
         /*long timer = System.currentTimeMillis();
 
         for (int i = 0; i <= 1000000; i++) {
@@ -31,15 +31,14 @@ public class Test {
 
         @Listener
         public void onEvent(Event<?> event, String string) {
-            System.out.println("1");
-            //System.out.println("Received");
+
         }
     }
 
     public static final class Event<T> {
-        public T something;
+        public String something;
 
-        public Event(T something) {
+        public Event(String something) {
             this.something = something;
         }
     }

@@ -157,8 +157,16 @@ public class EventBus {
             return this;
         }
 
-        public <T> Builder wrap(Class<T> k, EventWrapper<? super T> wrapper) {
-            eventWrappers.put(k, wrapper);
+        /**
+         * Define the data dispatched generic the generic data type class.
+         *
+         * @param eventClass is the event class of the generic event.
+         * @param wrapper is a function that takes an event and provides a generic T value.
+         * @return T value.
+         * @param <T> is a generic data type.
+         */
+        public <T> Builder wrap(Class<T> eventClass, EventWrapper<? super T> wrapper) {
+            eventWrappers.put(eventClass, wrapper);
             return this;
         }
 
@@ -170,6 +178,7 @@ public class EventBus {
         public EventBus build() {
             return new EventBus(factories, eventWrappers);
         }
+
     }
 
 }
