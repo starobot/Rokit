@@ -2,34 +2,37 @@ package bot.staro.rokit.impl;
 
 import bot.staro.rokit.EventConsumer;
 import bot.staro.rokit.EventWrapper;
+import bot.staro.rokit.utils.ReflectionUtil;
 
 import java.lang.invoke.LambdaMetafactory;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.BiConsumer;
 
-public class BiEventConsumer implements EventConsumer {
+public class MultiEventConsumer implements EventConsumer {
     private final Object instance;
     private final Method method;
     private final int priority;
     private final BiConsumer<Object, Object> consumer;
-    private final Class<?> type;
+    private final Class<?>[] types;
     private final EventWrapper<?> eventWrapper;
 
-    public BiEventConsumer(Object instance, Method method, int priority, EventWrapper<?> eventHandler) {
+    public MultiEventConsumer(Object instance, Method method, int priority, EventWrapper<?> eventHandler) {
         this.instance = instance;
         this.method = method;
         this.priority = priority;
         this.consumer = createConsumer();
-        this.type = method.getParameterTypes()[1];
+        this.types = Arrays.copyOfRange(method.getParameterTypes(), 1, method.getParameterTypes().length );
         this.eventWrapper = eventHandler;
     }
 
     @SuppressWarnings("unchecked")
     private BiConsumer<Object, Object> createConsumer() {
+        if (method.getParameters().length > 2) return null; // hack
         try {
             MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(this.method.getDeclaringClass(), MethodHandles.lookup());
             MethodType methodType = MethodType.methodType(void.class, method.getParameters()[0].getType(), method.getParameters()[1].getType());
@@ -49,12 +52,32 @@ public class BiEventConsumer implements EventConsumer {
 
     @Override
     public void invoke(Object event) {
-        Object extra = eventWrapper.invoke(event);
-        if (extra.getClass() != type) {
+        Object[] extra = eventWrapper.invoke(event);
+        if (extra.length != types.length) {
             return;
         }
 
-        consumer.accept(event, extra);
+        for (int i = 0; i < extra.length; i++) {
+            if (!ReflectionUtil.toNonPrimitive(types[i]).isInstance(extra[i])) {
+                return;
+            }
+        }
+
+        if (extra.length == 1) {
+            consumer.accept(event, extra);
+        } else {
+            try {
+                method.invoke(instance, add(extra, event));
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private static Object[] add(Object[] a, Object o) {
+        ArrayList<Object> r = new ArrayList<>(List.of(a));
+        r.addFirst(o);
+        return r.toArray();
     }
 
     @Override

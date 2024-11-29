@@ -1,7 +1,7 @@
 package bot.staro.rokit;
 
 import bot.staro.rokit.annotation.Listener;
-import bot.staro.rokit.impl.BiEventConsumer;
+import bot.staro.rokit.impl.MultiEventConsumer;
 import bot.staro.rokit.impl.EventConsumerImpl;
 
 import java.lang.annotation.Annotation;
@@ -30,7 +30,7 @@ public class EventBus {
             var priority = method.getAnnotation(Listener.class).priority().getVal();
             var wrapper = getWrapper(method);
             if (wrapper != null) {
-                return new BiEventConsumer(instance, method, priority, wrapper);
+                return new MultiEventConsumer(instance, method, priority, wrapper);
             }
 
             return new EventConsumerImpl(instance, method, priority);
