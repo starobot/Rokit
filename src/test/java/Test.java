@@ -4,20 +4,20 @@ import bot.staro.rokit.annotation.Listener;
 public class Test {
     public static void main(String[] args) {
         EventBus eventBus = EventBus.builder()
-                .wrap(Event.class, event -> event.something)
+                .wrap(Event.class, Event::getSomething)
                 .build();
-        //eventBus.subscribe(new TestSubscriber());
-        //eventBus.post(new Event<>("kek"));
+        eventBus.subscribe(new TestSubscriber());
+        eventBus.post(new Event<>("kek"));
 
         // Functional event bus benchmark
-        eventBus.subscribe(new BenchmarkListener());
+       /* eventBus.subscribe(new BenchmarkListener());
         long timer = System.currentTimeMillis();
 
         for (int i = 0; i <= 1000000; i++) {
             eventBus.post(new BenchmarkEvent());
         }
 
-        System.out.println(System.currentTimeMillis() - timer);
+        System.out.println(System.currentTimeMillis() - timer);*/
     }
 
     public static class BenchmarkListener {

@@ -67,6 +67,7 @@ public class MultiEventConsumer implements EventConsumer {
             consumer.accept(event, extra[0]);
         } else {
             try {
+                method.setAccessible(true);
                 method.invoke(instance, add(extra, event));
             } catch (IllegalAccessException | InvocationTargetException e) {
                 throw new RuntimeException(e);
