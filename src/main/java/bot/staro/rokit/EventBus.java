@@ -3,8 +3,8 @@ package bot.staro.rokit;
 import bot.staro.rokit.annotation.Listener;
 import bot.staro.rokit.function.EventWrapper;
 import bot.staro.rokit.function.SingleEventWrapper;
-import bot.staro.rokit.impl.MultiEventConsumer;
 import bot.staro.rokit.impl.EventConsumerImpl;
+import bot.staro.rokit.impl.MultiEventConsumer;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
@@ -12,7 +12,6 @@ import java.lang.reflect.Parameter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
-import java.util.stream.Collectors;
 
 /**
  * The central bus for dispatching (posting) events and managing subscribers (listeners).
@@ -26,8 +25,7 @@ public class EventBus {
     private final Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> listenerFactories = new HashMap<>();
     private final Map<Class<?>, EventWrapper<?>> eventWrappers = new HashMap<>();
 
-    private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories,
-                     Map<Class<?>, EventWrapper<?>> eventWrappers) {
+    private EventBus(Map<Class<? extends Annotation>, BiFunction<Object, Method, EventConsumer>> factories, Map<Class<?>, EventWrapper<?>> eventWrappers) {
         this.listenerFactories.put(Listener.class, (instance, method) -> {
             var priority = method.getAnnotation(Listener.class).priority().getVal();
             var wrapper = getWrapper(method);
@@ -37,9 +35,7 @@ public class EventBus {
 
             return new EventConsumerImpl(instance, method, priority);
         });
-
         this.listenerFactories.putAll(factories);
-
         this.eventWrappers.putAll(eventWrappers);
     }
 
@@ -75,23 +71,25 @@ public class EventBus {
                 }
             }
 
-            if (targetAnnotation != null) {
-                Class<?> eventType = method.getParameterTypes()[0];
-                BiFunction<Object, Method, EventConsumer> factory = listenerFactories.get(targetAnnotation.annotationType());
-                EventConsumer listener = factory.apply(subscriber, method);
-                listeners.compute(eventType, (key, currentList) -> {
-                    if (currentList == null) {
-                        return List.of(listener);
-                    }
-
-                    List<EventConsumer> newList = new ArrayList<>(currentList);
-                    newList.add(listener);
-                    newList.sort(Comparator.comparingInt(EventConsumer::getPriority).reversed());
-                    return newList;
-                });
-
-                subscriptions.computeIfAbsent(subscriber, k -> new HashSet<>()).add(eventType);
+            if (targetAnnotation == null) {
+                return;
             }
+
+            Class<?> eventType = method.getParameterTypes()[0];
+            BiFunction<Object, Method, EventConsumer> factory = listenerFactories.get(targetAnnotation.annotationType());
+            EventConsumer listener = factory.apply(subscriber, method);
+            listeners.compute(eventType, (key, currentList) -> {
+                if (currentList == null) {
+                    return List.of(listener);
+                }
+
+                List<EventConsumer> newList = new ArrayList<>(currentList);
+                newList.add(listener);
+                newList.sort(Comparator.comparingInt(EventConsumer::getPriority).reversed());
+                return newList;
+            });
+
+            subscriptions.computeIfAbsent(subscriber, k -> new HashSet<>()).add(eventType);
         }
     }
 
@@ -101,15 +99,23 @@ public class EventBus {
      * @param subscriber is an object containing listener methods.
      */
     public void unsubscribe(Object subscriber) {
-        List<Method> methods = getListeningMethods(subscriber.getClass());
-        for (Method method : methods) {
-            Class<?> eventType = method.getParameterTypes()[0];
-            listeners.computeIfPresent(eventType, (k, list) -> list.stream()
-                    .filter(listener -> !listener.getInstance().equals(subscriber))
-                    .collect(Collectors.toList()));
+        Set<Class<?>> subscribedEventTypes = subscriptions.remove(subscriber);
+        if (subscribedEventTypes == null) {
+            return;
         }
 
-        subscriptions.remove(subscriber);
+        for (Class<?> eventType : subscribedEventTypes) {
+            listeners.computeIfPresent(eventType, (key, currentList) -> {
+                List<EventConsumer> updatedList = new ArrayList<>();
+                for (EventConsumer listener : currentList) {
+                    if (!listener.getInstance().equals(subscriber)) {
+                        updatedList.add(listener);
+                    }
+                }
+
+                return updatedList.isEmpty() ? null : updatedList;
+            });
+        }
     }
 
     /**
@@ -123,11 +129,17 @@ public class EventBus {
     }
 
     private List<Method> getListeningMethods(Class<?> clazz) {
-        return Arrays.stream(clazz.getDeclaredMethods())
-                .filter(method -> /*method.getParameterCount() == 1 &&*/
-                        Arrays.stream(method.getAnnotations())
-                                .anyMatch(annotation -> listenerFactories.containsKey(annotation.annotationType())))
-                .collect(Collectors.toList());
+        List<Method> listeningMethods = new ArrayList<>();
+        for (Method method : clazz.getDeclaredMethods()) {
+            for (Annotation annotation : method.getAnnotations()) {
+                if (listenerFactories.containsKey(annotation.annotationType())) {
+                    listeningMethods.add(method);
+                    break;
+                }
+            }
+        }
+
+        return listeningMethods;
     }
 
     /**

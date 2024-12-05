@@ -10,9 +10,17 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 
+/**
+ * Implementation of the {@link EventConsumer} that handles methods with multiple arguments.
+ * Is used to dispatch the data from an event directly to the listener.
+ * Utilizes a lambda meta-factory for a fast method lookup.
+ */
 public class MultiEventConsumer implements EventConsumer {
     private final Object instance;
     private final Method method;
@@ -32,7 +40,10 @@ public class MultiEventConsumer implements EventConsumer {
 
     @SuppressWarnings("unchecked")
     private BiConsumer<Object, Object> createConsumer() {
-        if (method.getParameters().length > 2) return null; // hack
+        if (method.getParameters().length > 2) {
+            return null;
+        }
+
         try {
             MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(this.method.getDeclaringClass(), MethodHandles.lookup());
             MethodType methodType = MethodType.methodType(void.class, method.getParameters()[0].getType(), method.getParameters()[1].getType());

@@ -7,7 +7,7 @@ package bot.staro.rokit.function;
  * Implementation of this interface will provide the specific logic for handling
  * different types of events.</p>
  *
- * @param <T> the type of the event to be handled
+ * @param <T> the type of the event to be handled.
  */
 
 @FunctionalInterface
@@ -15,8 +15,8 @@ public interface EventWrapper<T> {
     /**
      * Handles provided event and returns an objects based on the implementation.
      *
-     * @param event the event to be handled
-     * @return objects representing the result of handling the event
+     * @param event the event to be handled.
+     * @return objects representing the result of handling the event.
      */
     Object[] handle(T event);
 
@@ -25,8 +25,8 @@ public interface EventWrapper<T> {
      * This default method allows for handling an event of a generic type by
      * casting the input object to the expected type {@code T}.
      *
-     * @param o the object to be handled, which is expected to be of type {@code T}
-     * @return objects representing the result of handling the event
+     * @param o the object to be handled, which is expected to be of type {@code T}.
+     * @return objects representing the result of handling the event.
      */
     @SuppressWarnings("unchecked")
     default Object[] invoke(Object o) {
