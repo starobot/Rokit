@@ -7,6 +7,36 @@ Here my goal was to rework [StaroEventSystem](https://github.com/starobot/StaroE
 As of now, I believe, Rokit is a great replacement for [StaroEventSystem](https://github.com/starobot/StaroEventSystem), since java 21 improved streams performance and introduced new tools, 
 which are suitable to write fast, efficient and easy to understand declarative code.
 
+Dependency:
+gradle:
+```
+repositories {
+			mavenCentral()
+			maven { url 'https://jitpack.io' }
+		}
+```
+```
+dependencies {
+	        implementation 'com.github.starobot:Rokit:1.0'
+	}
+```
+maven:
+```
+<repositories>
+		<repository>
+		    <id>jitpack.io</id>
+		    <url>https://jitpack.io</url>
+		</repository>
+	</repositories>
+```
+```
+	<dependency>
+	    <groupId>com.github.starobot</groupId>
+	    <artifactId>Rokit</artifactId>
+	    <version>1.0</version>
+	</dependency>
+```
+
 ### How to use it:
 First, you're gonna need to make an instance of the eventBus.
 ```java
