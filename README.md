@@ -57,7 +57,7 @@ public class StringEvent {
 Now, to successfully dispatch it we would only need to specify a wrapper for the event:
 ```java
 EventBus eventBus = EventBus.builder()
-                .wrap(StringEvent.class, StringEvent::getName)
+                .wrapSingle(StringEvent.class, StringEvent::getName)
                 .build();
 ```
 To get the data directly, you can make make a listener method with two arguments now:
