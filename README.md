@@ -10,24 +10,20 @@ which are suitable to write fast, efficient and easy to understand declarative c
 Dependency:
 gradle:
 ```
-repositories {
-			mavenCentral()
-			maven { url 'https://jitpack.io' }
-		}
+mavenCentral()
+maven { url 'https://jitpack.io' }
 ```
 ```
-dependencies {
-	        implementation 'com.github.starobot:Rokit:1.0'
-	}
+implementation 'com.github.starobot:Rokit:1.0'
 ```
 maven:
 ```
 <repositories>
-		<repository>
-		    <id>jitpack.io</id>
-		    <url>https://jitpack.io</url>
-		</repository>
-	</repositories>
+	<repository>
+		<id>jitpack.io</id>
+		 <url>https://jitpack.io</url>
+	</repository>
+</repositories>
 ```
 ```
 	<dependency>
