@@ -29,11 +29,9 @@ public class EventBus {
         this.listenerFactories.put(Listener.class, (instance, method) -> {
             var priority = method.getAnnotation(Listener.class).priority().getVal();
             var wrapper = getWrapper(method);
-            if (wrapper != null) {
-                return new MultiEventConsumer(instance, method, priority, wrapper);
-            }
-
-            return new EventConsumerImpl(instance, method, priority);
+            return wrapper != null
+                    ? new MultiEventConsumer(instance, method, priority, wrapper)
+                    : new EventConsumerImpl(instance, method, priority);
         });
         this.listenerFactories.putAll(factories);
         this.eventWrappers.putAll(eventWrappers);
@@ -45,10 +43,15 @@ public class EventBus {
      * @param event is the object to dispatch.
      */
     public void post(Object event) {
-        List<EventConsumer> consumers = listeners.getOrDefault(event.getClass(), Collections.emptyList());
-        if (consumers != null) {
-            for (EventConsumer consumer : consumers) {
-                consumer.invoke(event);
+        var eventConsumers = listeners.get(event.getClass());
+        if (eventConsumers != null && !eventConsumers.isEmpty()) {
+            for (var consumer : eventConsumers) {
+                try {
+                    consumer.invoke(event);
+                } catch (Exception e) {
+                    Thread.currentThread().getUncaughtExceptionHandler()
+                            .uncaughtException(Thread.currentThread(), e);
+                }
             }
         }
     }
@@ -61,10 +64,10 @@ public class EventBus {
      */
     public void subscribe(Object subscriber) {
         List<Method> methods = getListeningMethods(subscriber.getClass());
-        for (Method method : methods) {
+        for (var method : methods) {
             Annotation[] annotations = method.getAnnotations();
             Annotation targetAnnotation = null;
-            for (Annotation annotation : annotations) {
+            for (var annotation : annotations) {
                 if (listenerFactories.containsKey(annotation.annotationType())) {
                     targetAnnotation = annotation;
                     break;
@@ -99,21 +102,18 @@ public class EventBus {
      * @param subscriber is an object containing listener methods.
      */
     public void unsubscribe(Object subscriber) {
-        Set<Class<?>> subscribedEventTypes = subscriptions.remove(subscriber);
-        if (subscribedEventTypes == null) {
-            return;
-        }
-
-        for (Class<?> eventType : subscribedEventTypes) {
+        var subscribedTypes = subscriptions.remove(subscriber);
+        if (subscribedTypes == null) return;
+        for (var eventType : subscribedTypes) {
             listeners.computeIfPresent(eventType, (key, currentList) -> {
-                List<EventConsumer> updatedList = new ArrayList<>();
-                for (EventConsumer listener : currentList) {
+                var updatedList = new ArrayList<EventConsumer>();
+                for (var listener : currentList) {
                     if (!listener.getInstance().equals(subscriber)) {
                         updatedList.add(listener);
                     }
                 }
 
-                return updatedList.isEmpty() ? null : updatedList;
+                return updatedList.isEmpty() ? null : Collections.synchronizedList(updatedList);
             });
         }
     }
@@ -130,8 +130,8 @@ public class EventBus {
 
     private List<Method> getListeningMethods(Class<?> clazz) {
         List<Method> listeningMethods = new ArrayList<>();
-        for (Method method : clazz.getDeclaredMethods()) {
-            for (Annotation annotation : method.getAnnotations()) {
+        for (var method : clazz.getDeclaredMethods()) {
+            for (var annotation : method.getAnnotations()) {
                 if (listenerFactories.containsKey(annotation.annotationType())) {
                     listeningMethods.add(method);
                     break;
