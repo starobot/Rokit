@@ -184,7 +184,26 @@ public class EventBus {
          */
         public Builder registerListenerFactory(Class<? extends Annotation> annotationType,
                                                BiFunction<Object, Method, EventConsumer> factory) {
-            factories.put(annotationType, factory);
+            factories.put(annotationType, (instance, method) -> {
+                var wrapper = getWrapper(method);
+                return wrapper == null ? factory.apply(instance, method) : null;
+            });
+            return this;
+        }
+
+        /**
+         * Registers a custom listener factory for a specific annotation type.
+         * An example of such registry can be found inside {@link Builder} constructor.
+         *
+         * @param annotationType the annotation class used to mark methods.
+         * @param factory        the factory function to create listeners.
+         */
+        public Builder registerWrappedListenerFactory(Class<? extends Annotation> annotationType,
+                                               BiFunction<Object, Method, EventConsumer> factory) {
+            factories.put(annotationType, (instance, method) -> {
+                var wrapper = getWrapper(method);
+                return wrapper != null ? factory.apply(instance, method) : null;
+            });
             return this;
         }
 
@@ -207,6 +226,15 @@ public class EventBus {
             return new EventBus(factories, eventWrappers);
         }
 
+        private EventWrapper<?> getWrapper(Method method) {
+            Parameter[] p = method.getParameters();
+            if (p.length < 2) {
+                return null;
+            }
+
+            Class<?> type = p[0].getType();
+            return eventWrappers.get(type);
+        }
     }
 
 }
