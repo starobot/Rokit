@@ -14,7 +14,7 @@ mavenCentral()
 maven { url 'https://jitpack.io' }
 ```
 ```
-implementation 'com.github.starobot:Rokit:1.1'
+implementation 'com.github.starobot:Rokit:1.2'
 ```
 maven:
 ```
@@ -29,7 +29,7 @@ maven:
 	<dependency>
 	    <groupId>com.github.starobot</groupId>
 	    <artifactId>Rokit</artifactId>
-	    <version>1.1</version>
+	    <version>1.2</version>
 	</dependency>
 ```
 
