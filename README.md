@@ -3,9 +3,7 @@
 [![CodeFactor](https://www.codefactor.io/repository/github/starobot/rokit/badge)](https://www.codefactor.io/repository/github/starobot/rokit)
 
 ### A fast, efficient and flexible event system for java 21.
-Here my goal was to rework [StaroEventSystem](https://github.com/starobot/StaroEventSystem) entirely, make it more flexible, declarative, without the loss of performance at the end.
-As of now, I believe, Rokit is a great replacement for [StaroEventSystem](https://github.com/starobot/StaroEventSystem), since java 21 improved streams performance and introduced new tools, 
-which are suitable to write fast, efficient and easy to understand declarative code.
+Here my goal was to rework [StaroEventSystem](https://github.com/starobot/StaroEventSystem) entirely, make it more flexible, but without the loss of performance at the end.
 
 Dependency:
 gradle:
@@ -93,3 +91,7 @@ public void onEvent(StringEvent<?> event, String name) {
      //if (name ....
 }
 ```
+
+TODO: 
+1. fix custom multieventconsumer creation
+2. make an empty eventbus instance option
