@@ -1,4 +1,3 @@
-// file: rokit-api/src/main/java/bot/staro/rokit/impl/DefaultListenerHandler.java
 package bot.staro.rokit.impl;
 
 import bot.staro.rokit.AnnotationHandler;
@@ -14,41 +13,26 @@ import java.lang.reflect.Method;
  * Supports multi-arg wrapped listeners by using the bus's EventWrapper.
  */
 public record DefaultListenerHandler() implements AnnotationHandler {
-
     @Override
-    public <E> EventConsumer<E> createConsumer(
-            ListenerRegistry bus,
-            Object listenerInstance,
-            Method method,
-            int priority,
-            Class<E> eventType
-    ) {
-        // figure out how many parameters the method expects
+    public <E> EventConsumer<E> createConsumer(ListenerRegistry bus, Object listenerInstance, Method method, int priority, Class<E> eventType) {
         int paramCount = method.getParameterCount();
-
         EventConsumer<E> consumer = new EventConsumer<>() {
             @Override
             public void accept(E event) {
                 try {
                     if (paramCount == 1) {
-                        // simple single-arg listener
                         method.invoke(listenerInstance, event);
                     } else {
-                        // lookup wrapper for this event type
-                        @SuppressWarnings("unchecked")
-                        EventWrapper<E> wrapper = (EventWrapper<E>) bus.getWrapper(eventType);
+                        EventWrapper<E> wrapper = bus.getWrapper(eventType);
                         if (wrapper == null) {
-                            // no wrapper registered → skip
                             return;
                         }
 
                         Object[] extras = wrapper.wrap(event);
-                        // must match paramCount − 1 extras
                         if (extras.length != paramCount - 1) {
                             return;
                         }
 
-                        // build argument array: [event, extras...]
                         Object[] args = new Object[paramCount];
                         args[0] = event;
                         System.arraycopy(extras, 0, args, 1, extras.length);
@@ -76,8 +60,8 @@ public record DefaultListenerHandler() implements AnnotationHandler {
             }
         };
 
-        // register on the bus, so bus.post() will call it
         bus.internalRegister(eventType, consumer);
         return consumer;
     }
+
 }
