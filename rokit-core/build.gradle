@@ -3,9 +3,6 @@ plugins {
     id 'maven-publish'
 }
 
-group = 'bot.staro.rokit'
-version = '2.0.0'
-
 dependencies {
     implementation project(':rokit-api')
     annotationProcessor project(':rokit-processor')
@@ -14,9 +11,6 @@ dependencies {
 }
 
 java {
-    withSourcesJar()
-    withJavadocJar()
-
     sourceSets.main {
         java {
             srcDir "$buildDir/generated/sources/annotationProcessor/java/main"
@@ -26,17 +20,4 @@ java {
 
 tasks.named('sourcesJar') {
     dependsOn tasks.named('compileJava')
-}
-
-
-tasks.withType(JavaCompile).configureEach {
-    options.release.set(21)
-}
-
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
-        }
-    }
 }
