@@ -1,122 +1,70 @@
 package bot.staro.rokit;
 
-public class Benchmark {
-    static final int WARMUP_ITERATIONS = 5;
-    static final int BENCHMARK_ITERATIONS = 10;
-    static final int EVENTS_PER_TEST = 1_000_000;
+import bot.staro.rokit.guavabus.GuavaListener;
+import bot.staro.rokit.rokitbus.RokitListener;
+import meteordevelopment.orbit.EventHandler;
+import meteordevelopment.orbit.IEventBus;
 
+import java.lang.invoke.MethodHandles;
+
+public final class Benchmark {
     public static void main(String[] args) {
-        EventBus eventBus = EventBusBuilder.builder()
-                .wrapSingle(WrappedEvent.class, WrappedEvent::getWrap)
-                .build();
+        EventBus rokit = EventBusBuilder.builder().build();
+        IEventBus orbit = new meteordevelopment.orbit.EventBus();
+        orbit.registerLambdaFactory("bruh", (lookupInMethod, klass) -> (MethodHandles.Lookup) lookupInMethod.invoke(null, klass, MethodHandles.lookup()));
+        var guava = new com.google.common.eventbus.EventBus();
 
-        DangListener listener = new DangListener();
-        eventBus.subscribe(listener);
-        eventBus.post(new BenchmarkEvent());
-        eventBus.post(new WrappedEvent<>("it's a wrap"));
-        eventBus.unsubscribe(listener);
+        var rokitListener = new RokitListener();
+        var guavaListener = new GuavaListener();
 
-        var simpleListener = new BenchmarkListener();
-        var benchEvent = new BenchmarkEvent();
+        var event = new Event();
 
-        runWarmup(eventBus, simpleListener, benchEvent);
+        // JVM warmup
+        /*BenchmarkUtil.runWarmup(() -> rokit.subscribe(rokitListener), () -> rokit.post(event), () -> rokit.unsubscribe(rokitListener));
+        BenchmarkUtil.runWarmup(() -> orbit.subscribe(accept(event)), () -> orbit.post(event), () -> orbit.unsubscribe(this));
+        BenchmarkUtil.runWarmup(() -> guava.register(guavaListener), () -> guava.post(event), () -> guava.unregister(guavaListener));*/
 
-        // Benchmark 1: Simple Events
-        var simpleResults = new long[BENCHMARK_ITERATIONS];
-        for (int i = 0; i < BENCHMARK_ITERATIONS; i++) {
-            eventBus.subscribe(simpleListener);
-            simpleResults[i] = measureSimpleEvents(eventBus, benchEvent);
-            eventBus.unsubscribe(simpleListener);
+        // 1 Million events
+
+        // Rokit
+        /*rokit.subscribe(rokitListener);
+        var rokitResults = new long[BenchmarkUtil.BENCHMARK_ITERATIONS];
+        for (int i = 0; i < BenchmarkUtil.BENCHMARK_ITERATIONS; i++) {
+            rokitResults[i] = BenchmarkUtil.measurePureDispatch(rokit::post, event);
         }
 
-        printResults("Simple Events", simpleResults);
+        rokit.unsubscribe(rokitListener);
+        printResults("Rokit 1_000_000 events", rokitResults);
 
-        for (int i = 0; i < 200; i++) {
-            eventBus.subscribe(new BenchmarkListener());
+        // Orbit
+        orbit.subscribe(this);
+        var orbitResults = new long[BenchmarkUtil.BENCHMARK_ITERATIONS];
+        for (int i = 0; i < BenchmarkUtil.BENCHMARK_ITERATIONS; i++) {
+            orbitResults[i] = BenchmarkUtil.measurePureDispatch(orbit::post, event);
         }
 
-        long nanos = System.nanoTime();
-        eventBus.post(new BenchmarkEvent());
-        long delta = System.nanoTime() - nanos;
-        System.out.println("Posting one event for 200 subscribers took: " + delta);
-    }
+        orbit.unsubscribe(this);
+        printResults("Orbit 1_000_000 events", orbitResults);
 
-    static void runWarmup(EventBus eventRegistry, BenchmarkListener simpleListener, BenchmarkEvent benchEvent) {
-        for (int i = 0; i < WARMUP_ITERATIONS; i++) {
-            eventRegistry.subscribe(simpleListener);
-            measureSimpleEvents(eventRegistry, benchEvent);
-            eventRegistry.unsubscribe(simpleListener);
+        // Guava
+        guava.register(guavaListener);
+        var guavaResults = new long[BenchmarkUtil.BENCHMARK_ITERATIONS];
+        for (int i = 0; i < BenchmarkUtil.BENCHMARK_ITERATIONS; i++) {
+            guavaResults[i] = BenchmarkUtil.measurePureDispatch(guava::post, event);
         }
-    }
 
-    static long measureSimpleEvents(EventBus bus, BenchmarkEvent event) {
-        long start = System.nanoTime();
-        for (int i = 0; i < EVENTS_PER_TEST; i++) {
-            bus.post(event);
-        }
-        return System.nanoTime() - start;
+        guava.unregister(guavaListener);
+        printResults("Orbit 1_000_000 events", guavaResults);*/
     }
 
     static void printResults(String testName, long[] results) {
-        double avgMs = calculateAverage(results) / 1_000_000.0;
-        double stdDev = calculateStdDev(results) / 1_000_000.0;
-        double opsPerSec = EVENTS_PER_TEST / (avgMs / 1000);
-
+        double avgMs = MeasuringUtil.calculateAverage(results) / 1_000_000.0;
+        double stdDev = MeasuringUtil.calculateStdDev(results) / 1_000_000.0;
+        double opsPerSec = BenchmarkUtil.EVENTS_PER_TEST / (avgMs / 1000);
         System.out.printf("\n%s:\n", testName);
         System.out.printf("  Average time: %.2f ms\n", avgMs);
         System.out.printf("  Std Dev: %.2f ms\n", stdDev);
         System.out.printf("  Operations/sec: %.2f\n", opsPerSec);
-    }
-
-    static double calculateAverage(long[] results) {
-        double sum = 0;
-        for (long result : results) {
-            sum += result;
-        }
-
-        return sum / results.length;
-    }
-
-    static double calculateStdDev(long[] results) {
-        double avg = calculateAverage(results);
-        double sumSquares = 0;
-        for (long result : results) {
-            sumSquares += Math.pow(result - avg, 2);
-        }
-
-        return Math.sqrt(sumSquares / results.length);
-    }
-
-    public static class BenchmarkListener {
-        @Listener
-        public void onEvent(BenchmarkEvent e) {}
-    }
-
-    public static final class BenchmarkEvent {}
-
-    public static final class WrappedEvent<W> {
-        private final W wrap;
-
-        WrappedEvent(W wrap) {
-            this.wrap = wrap;
-        }
-
-        public W getWrap() {
-            return wrap;
-        }
-
-    }
-
-    public static class DangListener {
-        @Listener
-        public void onEvent(BenchmarkEvent ignored) {
-            System.out.println("Dang");
-        }
-
-        @Listener
-        public void onEvent(WrappedEvent<String> event, String wrap) {
-            System.out.println(wrap);
-        }
     }
 
 }

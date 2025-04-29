@@ -5,7 +5,7 @@ import java.util.Map;
 
 // not final in case anyone decides to extend it.
 public class EventBusBuilder extends EventRegistry implements EventBus {
-    private EventBusBuilder() {
+    protected EventBusBuilder() {
         super();
     }
 
@@ -33,7 +33,7 @@ public class EventBusBuilder extends EventRegistry implements EventBus {
         return new Builder();
     }
 
-    public static class Builder {
+    public static final class Builder {
         private final Map<Class<?>,EventWrapper<?>> wrappers = new HashMap<>();
 
         public <T> Builder wrap(Class<T> eventType, EventWrapper<T> wrapper) {
