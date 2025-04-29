@@ -1,3 +1,5 @@
 rootProject.name = 'rokit'
-include 'bus'
+include 'rokit-core', 'rokit-processor'
+include 'rokit-api'
+include 'rokit-benchmark'
 

@@ -1,39 +1,12 @@
-plugins {
-    id 'java'
-    id 'maven-publish'
-}
+subprojects {
+    apply plugin: 'java'
+    sourceCompatibility = '21'
+    targetCompatibility = '21'
 
-group = 'bot.staro.rokit'
-version = '1.0.0'
-
-repositories {
-    mavenCentral()
-    maven { url 'https://jitpack.io' }
-}
-
-dependencies {
-    testImplementation platform('org.junit:junit-bom:5.10.0')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
-}
-
-test {
-    useJUnitPlatform()
-}
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.release.set(21)
-}
-
-publishing {
-    publications {
-        java(MavenPublication) {
-            from components.java
+    repositories {
+        mavenCentral()
+        maven {
+            url 'https://jitpack.io'
         }
     }
 }
