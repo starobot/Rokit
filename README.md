@@ -2,96 +2,56 @@
 
 [![CodeFactor](https://www.codefactor.io/repository/github/starobot/rokit/badge)](https://www.codefactor.io/repository/github/starobot/rokit)
 
-### A fast, efficient and flexible event system for java 21.
-Here my goal was to rework [StaroEventSystem](https://github.com/starobot/StaroEventSystem) entirely, make it more flexible, but without the loss of performance at the end.
+A blazing-fast, zero-reflection, compile-time-generated event bus for Java 21.
 
-Dependency:
-gradle:
-```
-mavenCentral()
-maven { url 'https://jitpack.io' }
-```
-```
-implementation 'com.github.starobot:Rokit:1.2'
-```
-maven:
-```
-<repositories>
-	<repository>
-		<id>jitpack.io</id>
-		 <url>https://jitpack.io</url>
-	</repository>
-</repositories>
-```
-```
-	<dependency>
-	    <groupId>com.github.starobot</groupId>
-	    <artifactId>Rokit</artifactId>
-	    <version>1.2</version>
-	</dependency>
-```
-
-### How to use it:
-First, you're gonna need to make an instance of the eventRegistry.
+## 🚀 Quick Start
+**Create your bus**  
 ```java
-EventBus eventRegistry = EventBus.builder()
-                .build();
+ EventBus bus = EventBusBuilder.builder()
+       .build();
 ```
-For the custom listener annotation and listener factory you can use this builder tool.
+**Define your listener**
 ```java
-BiFunction<Object, Method, EventListener> customFactory = (instance, method) ->
-                new CustomListener(instance, method, method.getAnnotation(CustomAnnotation.class).priority().getVal());
-
-EventBus eventRegistry = EventBus.builder()
-                .registerListenerFactory(CustomAnnotation.class, customFactory)
-                .build();
+public class MyListener {
+  @Listener
+  public void onEvent(MyEvent e) {
+    System.out.println("Received: " + e);
+  }
+}
 ```
-
-
-Now, to receive an event, we need to subscribe the lister class, so the methods annotated with @Listener start receiving events.
+**Subscribe/unsubscribe
 ```java
-eventRegistry.subscribe(new EventReceivingClass());
-```
-To remove the listener, there's this method. The class containing listener methods will no longer get executed upon dispatching an event.
-```java
-eventRegistry.unsubscribe(new EventReceivingClass());
+var listener = new MyListener();
+bus.subscribe(listener);
+
+bus.post(new MyEvent(/* … */));
+
+bus.unsubscribe(listener);
 ```
 
-To dispatch an event, you can use method "post"
-```java
-eventRegistry.post(new Event());
-```
-The eventRegistry also supports dispatching the event data type directly. (Shoutout to [cattyn](https://github.com/cattyngmd))
-For posting such an event, you must make a wrapper for the event class and specify the field you are passing.
-For example, if we have an event with a String:
+🎁 Wrapped (Multi-arg) Events
+
+If your event carries extra data you want injected as method arguments, register a wrapper:
+
 ```java
 public class StringEvent {
-    private final String name;
-
-    public StringEvent(String name) {
-        this.name = name;
-    }
-    
-    public String getName() {
-        return name;
-    }
-
+  private final String payload;
+  public StringEvent(String payload) { this.payload = payload; }
+  public String getPayload()       { return payload;       }
 }
-```
-Now, to successfully dispatch it we would only need to specify a wrapper for the event:
-```java
-EventBus eventRegistry = EventBus.builder()
-                .wrapSingle(StringEvent.class, StringEvent::getName)
-                .build();
-```
-To get the data directly, you can make make a listener method with two arguments now:
-```java
-@Listener
-public void onEvent(StringEvent<?> event, String name) {
-     //if (name ....
+
+EventBus bus = EventBusBuilder.builder()
+    .wrapSingle(StringEvent.class, StringEvent::getPayload)
+    .build();
+
+public class PayloadListener {
+  @Listener
+  public void onString(StringEvent e, String payload) {
+    System.out.println("Wrapped payload: " + payload);
+  }
 }
 ```
 
-TODO: 
-1. fix custom multieventconsumer creation
-2. make an empty eventbus instance option
+//TODO:
+A guide on custom annotations
+
