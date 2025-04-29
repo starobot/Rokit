@@ -5,7 +5,7 @@ import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-// TODO: Reflective scanning is chinese. Figure out something better.
+// Reflective scanning for now until I figure out something better.
 public class EventRegistry implements ListenerRegistry {
     protected final Map<Class<?>,List<EventConsumer<?>>> listeners = new ConcurrentHashMap<>();
     protected final Map<Class<?>,EventWrapper<?>> wrappers = new HashMap<>();
@@ -115,6 +115,7 @@ public class EventRegistry implements ListenerRegistry {
             if (isNoop()) {
                 return false;
             }
+
             try {
                 // this is bad.
                 assert subscribers != null;

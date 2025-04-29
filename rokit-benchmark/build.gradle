@@ -3,7 +3,7 @@ plugins {
 }
 
 group = 'bot.staro.rokit'
-version = 'unspecified'
+version = '2.0.0'
 
 repositories {
     mavenCentral()

@@ -64,8 +64,7 @@ public class EventListenerProcessor extends AbstractProcessor {
 
         try {
             writeRegistry(builtin, listenerAnnos, byClass);
-        }
-        catch (IOException ex) {
+        } catch (IOException ex) {
             processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, "Failed to write EventListenerRegistry: " + ex);
         }
 
@@ -73,7 +72,7 @@ public class EventListenerProcessor extends AbstractProcessor {
     }
 
     private void writeRegistry(TypeElement builtin, Set<TypeElement> listenerAnnos, Map<String,List<MethodInfo>> byClass) throws IOException {
-        String pkg       = "bot.staro.rokit.generated";
+        String pkg = "bot.staro.rokit.generated";
         String className = "EventListenerRegistry";
         JavaFileObject jfo = processingEnv.getFiler().createSourceFile(pkg + "." + className);
         Set<String> handlerFqns = new TreeSet<>();
