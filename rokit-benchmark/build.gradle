@@ -1,0 +1,21 @@
+plugins {
+    id 'java'
+}
+
+group = 'bot.staro.rokit'
+version = 'unspecified'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':rokit-api')
+    implementation project(':rokit-core')
+    compileOnly project(':rokit-processor')
+    annotationProcessor project(':rokit-processor')
+}
+
+test {
+    useJUnitPlatform()
+}

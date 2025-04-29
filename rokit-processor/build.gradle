@@ -1,0 +1,22 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'bot.staro.rokit'
+version = '2.0.0'
+
+dependencies {
+    compileOnly project(":rokit-api")
+    compileOnly 'com.google.auto.service:auto-service-annotations:1.0.1'
+    annotationProcessor 'com.google.auto.service:auto-service:1.0.1'
+}
+
+
+publishing {
+    publications {
+        java(MavenPublication) {
+            from components.java
+        }
+    }
+}
