@@ -173,8 +173,7 @@ public class EventListenerProcessor extends AbstractProcessor {
                         w.write("                    \"" + name + "\",\n");
                         w.write("                    " + params.size() + "\n");
                         w.write("                );\n");
-                        w.write("                var consumer = new " + handler + "();\n");
-                        w.write("                consumer = consumer.createConsumer(\n");
+                        w.write("                var consumer = new " + handler + "()" + ".createConsumer(\n");
                         w.write("                    bus,\n");
                         w.write("                    listener,\n");
                         w.write("                    method,\n");
@@ -188,6 +187,7 @@ public class EventListenerProcessor extends AbstractProcessor {
                 w.write("            SUBSCRIBERS.put(listener, list);\n");
                 w.write("        }\n");
             }
+
             w.write("    }\n\n");
             w.write("    public static void unregister(EventRegistry bus, Object subscriber) {\n");
             w.write("        List<EventConsumer<?>> list = SUBSCRIBERS.remove(subscriber);\n");
