@@ -83,6 +83,50 @@ public class EventListenerProcessor extends AbstractProcessor {
             }
         }
 
+        for (var entry : byClass.entrySet()) {
+            String classFqn = entry.getKey();
+            TypeElement classElement = elementUtils.getTypeElement(classFqn);
+            String classPackage = elementUtils.getPackageOf(classElement).getQualifiedName().toString();
+            boolean hasPrivateMethods = false;
+            Set<String> privateMethodNames = new HashSet<>();
+
+            for (MethodInfo mi : entry.getValue()) {
+                ExecutableElement m = mi.method();
+                if (m.getModifiers().contains(Modifier.PRIVATE)) {
+                    hasPrivateMethods = true;
+                    privateMethodNames.add(m.getSimpleName().toString());
+                }
+            }
+
+            if (hasPrivateMethods) {
+                String accessorClassName = classElement.getSimpleName() + "EventAccessor";
+                String accessorFqcn = classPackage + "." + accessorClassName;
+                JavaFileObject accessorFile = processingEnv.getFiler().createSourceFile(accessorFqcn);
+                try (Writer writer = accessorFile.openWriter()) {
+                    writer.write("package " + classPackage + ";\n\n");
+                    writer.write("// Generated accessor for private event listener methods\n");
+                    writer.write("class " + accessorClassName + " {\n");
+                    for (String methodName : privateMethodNames) {
+                        for (MethodInfo mi : entry.getValue()) {
+                            ExecutableElement m = mi.method();
+                            if (m.getSimpleName().toString().equals(methodName) && m.getModifiers().contains(Modifier.PRIVATE)) {
+                                List<? extends VariableElement> params = m.getParameters();
+                                String eventType = rawType(params.getFirst().asType().toString());
+
+                                writer.write("    static void " + methodName + "Accessor(" +
+                                        classElement.getSimpleName() + " instance, " +
+                                        eventType + " event) {\n");
+                                writer.write("        instance." + methodName + "(event);\n");
+                                writer.write("    }\n\n");
+                            }
+                        }
+                    }
+
+                    writer.write("}\n");
+                }
+            }
+        }
+
         try (Writer w = jfo.openWriter()) {
             w.write("package " + pkg + "; \n\n");
             w.write("import bot.staro.rokit.EventRegistry; \n");
@@ -100,6 +144,9 @@ public class EventListenerProcessor extends AbstractProcessor {
             w.write("    public static void register(EventRegistry bus, Object subscriber) { \n");
             for (var entry : byClass.entrySet()) {
                 String subType = entry.getKey();
+                TypeElement classElement = elementUtils.getTypeElement(subType);
+                String classPackage = elementUtils.getPackageOf(classElement).getQualifiedName().toString();
+                String accessorClassName = classElement.getSimpleName() + "EventAccessor";
                 w.write("        if (subscriber instanceof " + subType + ") { \n");
                 w.write("            " + subType + " listener = (" + subType + ")subscriber; \n");
                 w.write("            List<EventConsumer<?>> list = new ArrayList<>(); \n");
@@ -110,12 +157,18 @@ public class EventListenerProcessor extends AbstractProcessor {
                     String eventType = rawType(params.getFirst().asType().toString());
                     String methodName = m.getSimpleName().toString();
                     int prio = extractPriority(m, anno);
+                    boolean isPrivate = m.getModifiers().contains(Modifier.PRIVATE);
                     if (anno.equals(builtin) && params.size() == 1) {
                         w.write("            { \n");
                         w.write("                EventConsumer<" + eventType + "> c = new EventConsumer<>() {\n");
                         w.write("                    @Override\n");
                         w.write("                    public void accept(" + eventType + " e) {\n");
-                        w.write("                        listener." + methodName + "(e);\n");
+                        if (isPrivate) {
+                            w.write("                        " + classPackage + "." + accessorClassName + "." + methodName + "Accessor(listener, e);\n");
+                        } else {
+                            w.write("                        listener." + methodName + "(e);\n");
+                        }
+
                         w.write("                    }\n\n");
                         w.write("                    @Override public Object getInstance() { return listener; }\n");
                         w.write("                    @Override public int getPriority()    { return " + prio + "; }\n");
@@ -127,18 +180,27 @@ public class EventListenerProcessor extends AbstractProcessor {
                     } else {
                         String handlerSimple = extractHandler(anno).replaceFirst(".+\\.", "");
                         w.write("            { \n");
-                        w.write("                Method method = getMethod(\n");
-                        w.write("                    listener,\n");
-                        w.write("                    \"" + methodName + "\",\n");
-                        w.write("                    " + params.size() + "\n");
-                        w.write("                ); \n");
-                        w.write("                var consumer = new " + handlerSimple + "( )\n");
+                        w.write("                Method m = "
+                                + subType
+                                + ".class.getDeclaredMethod(\""
+                                + methodName
+                                + "\", "
+                                + eventType
+                                + ".class); \n");
+                        w.write("                m.setAccessible(true); \n");
+                        w.write("                var consumer = new "
+                                + handlerSimple
+                                + "()\n");
                         w.write("                    .createConsumer(\n");
                         w.write("                        bus,\n");
                         w.write("                        listener,\n");
-                        w.write("                        method,\n");
-                        w.write("                        " + prio + ",\n");
-                        w.write("                        " + eventType + ".class\n");
+                        w.write("                        m,\n");
+                        w.write("                        "
+                                + prio
+                                + ",\n");
+                        w.write("                        "
+                                + eventType
+                                + ".class\n");
                         w.write("                    ); \n");
                         w.write("                list.add(consumer); \n");
                         w.write("            } \n");
