@@ -4,8 +4,8 @@
 
 A blazing-fast, zero-reflection, compile-time-generated event bus for Java 21.
 
-#WARNING
-##This is still in beta and is currently being tested in another project. 
+# WARNING
+## This is still in beta and is currently being tested in another project. 
 
 ## 🚀 Quick Start
 **Create your bus**  
