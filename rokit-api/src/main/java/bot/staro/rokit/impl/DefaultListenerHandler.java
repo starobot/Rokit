@@ -36,6 +36,13 @@ public record DefaultListenerHandler() implements AnnotationHandler {
                         Object[] args = new Object[paramCount];
                         args[0] = event;
                         System.arraycopy(extras, 0, args, 1, extras.length);
+                        Class<?>[] paramTypes = method.getParameterTypes();
+                        for (int i = 1; i < paramTypes.length; i++) {
+                            Object a = args[i];
+                            if (a != null && !paramTypes[i].isInstance(a)) {
+                                return;
+                            }
+                        }
 
                         method.invoke(listenerInstance, args);
                     }
