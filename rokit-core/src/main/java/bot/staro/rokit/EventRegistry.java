@@ -2,8 +2,12 @@ package bot.staro.rokit;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 // Reflective scanning for now until I figure out something better.
 public class EventRegistry implements ListenerRegistry {
@@ -37,7 +41,7 @@ public class EventRegistry implements ListenerRegistry {
     }
 
     public <T> void internalRegister(Class<T> eventType, EventConsumer<?> c) {
-        listeners.computeIfAbsent(eventType, k -> new ArrayList<>())
+        listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>())
                 .add(c);
         listeners.get(eventType).sort(Comparator.<EventConsumer<?>>comparingInt(EventConsumer::getPriority)
                 .reversed());

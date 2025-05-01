@@ -1,6 +1,7 @@
 package bot.staro.rokit.processor;
 
 import com.google.auto.service.AutoService;
+
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
@@ -124,13 +125,14 @@ public class EventListenerProcessor extends AbstractProcessor {
             w.write("import bot.staro.rokit.EventConsumer;\n");
             w.write("import bot.staro.rokit.EventWrapper;\n");
             w.write("import java.util.*;\n");
-            w.write("import java.lang.reflect.Method;\n\n");
+            w.write("import java.lang.reflect.Method;\n");
+            w.write("import java.util.concurrent.ConcurrentHashMap;\n\n");
             for (String fqn : handlerFqns) {
                 w.write("import " + fqn + ";\n");
             }
 
             w.write("public final class " + className + " {\n");
-            w.write("    public static final Map<Object,List<EventConsumer<?>>> SUBSCRIBERS = new HashMap<>();\n\n");
+            w.write("    public static final Map<Object,List<EventConsumer<?>>> SUBSCRIBERS = new ConcurrentHashMap<>();\n\n");
             w.write("    public static void register(EventRegistry bus, Object subscriber) {\n");
             for (var entry : byClass.entrySet()) {
                 String sub = entry.getKey();
