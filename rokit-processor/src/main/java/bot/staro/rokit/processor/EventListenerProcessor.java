@@ -186,6 +186,7 @@ public class EventListenerProcessor extends AbstractProcessor {
                         w.write("            }\n");
                     }
                 }
+
                 w.write("            SUBSCRIBERS.put(listener, list);\n");
                 w.write("        }\n");
             }

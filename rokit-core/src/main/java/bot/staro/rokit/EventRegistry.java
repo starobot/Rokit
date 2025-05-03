@@ -65,26 +65,16 @@ public class EventRegistry implements ListenerRegistry {
     private static RegistryInvoker findRegistry() {
         try {
             Class<?> registry = Class.forName("bot.staro.rokit.generated.EventListenerRegistry");
-            Method register   = registry.getMethod("register", EventRegistry.class, Object.class);
+            Method register = registry.getMethod("register", EventRegistry.class, Object.class);
             Method unregister = registry.getMethod("unregister", EventRegistry.class, Object.class);
-            Field subsField  = registry.getField("SUBSCRIBERS");
+            Field subsField = registry.getField("SUBSCRIBERS");
             return new RegistryInvoker(register, unregister, subsField);
         } catch (Exception e) {
             return new RegistryInvoker();
         }
     }
 
-    private static final class RegistryInvoker {
-        private final Method register;
-        private final Method unregister;
-        private final Field subscribers;
-
-        private RegistryInvoker(Method register, Method unregister, Field subscribers) {
-            this.register = register;
-            this.unregister = unregister;
-            this.subscribers = subscribers;
-        }
-
+    private record RegistryInvoker(Method register, Method unregister, Field subscribers) {
         private RegistryInvoker() {
             this(null, null, null);
         }
@@ -124,7 +114,7 @@ public class EventRegistry implements ListenerRegistry {
                 // this is bad.
                 assert subscribers != null;
                 @SuppressWarnings("unchecked")
-                Map<Object,List<?>> map = (Map<Object,List<?>>)subscribers.get(null);
+                Map<Object,List<?>> map = (Map<Object,List<?>>) subscribers.get(null);
                 return map.containsKey(sub);
             } catch (Exception e) {
                 throw new RuntimeException(e);

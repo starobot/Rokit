@@ -8,7 +8,7 @@ import java.lang.invoke.MethodHandles;
 
 public final class Benchmark {
     public static void main(String[] args) {
-        EventBus rokit = EventBusBuilder.builder().build();
+        EventBus rokit = RokitEventBus.builder().build();
         IEventBus orbit = new meteordevelopment.orbit.EventBus();
         orbit.registerLambdaFactory("bruh", (lookupInMethod, klass) -> (MethodHandles.Lookup) lookupInMethod.invoke(null, klass, MethodHandles.lookup()));
         var guava = new com.google.common.eventbus.EventBus();
