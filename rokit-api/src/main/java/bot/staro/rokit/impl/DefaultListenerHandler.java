@@ -12,7 +12,7 @@ import java.lang.reflect.Method;
  * Fallback handler for any listener annotation that isn't inlined.
  * Supports multi-arg wrapped listeners by using the bus's EventWrapper.
  */
-public record DefaultListenerHandler() implements AnnotationHandler {
+public class DefaultListenerHandler implements AnnotationHandler {
     @Override
     public <E> EventConsumer<E> createConsumer(ListenerRegistry bus, Object listenerInstance, Method method, int priority, Class<E> eventType) {
         int paramCount = method.getParameterCount();
