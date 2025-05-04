@@ -15,60 +15,123 @@ import java.lang.reflect.Method;
 public class DefaultListenerHandler implements AnnotationHandler {
     @Override
     public <E> EventConsumer<E> createConsumer(ListenerRegistry bus, Object listenerInstance, Method method, int priority, Class<E> eventType) {
-        int paramCount = method.getParameterCount();
-        EventConsumer<E> consumer = new EventConsumer<>() {
-            @Override
-            public void accept(E event) {
-                try {
-                    if (paramCount == 1) {
-                        method.invoke(listenerInstance, event);
-                    } else {
-                        EventWrapper<E> wrapper = bus.getWrapper(eventType);
-                        if (wrapper == null) {
-                            return;
-                        }
+        EventConsumer<E> consumer = createConsumerInstance(bus, listenerInstance, method, priority, eventType);
+        bus.internalRegister(eventType, consumer);
+        return consumer;
+    }
 
-                        Object[] extras = wrapper.wrap(event);
-                        if (extras.length != paramCount - 1) {
-                            return;
-                        }
+    protected <E> EventConsumer<E> createConsumerInstance(ListenerRegistry bus, Object listenerInstance, Method method, int priority, Class<E> eventType) {
+        return new DefaultEventConsumer<>(bus, listenerInstance, method, priority, eventType);
+    }
 
-                        Object[] args = new Object[paramCount];
-                        args[0] = event;
-                        System.arraycopy(extras, 0, args, 1, extras.length);
-                        Class<?>[] paramTypes = method.getParameterTypes();
-                        for (int i = 1; i < paramTypes.length; i++) {
-                            Object a = args[i];
-                            if (a != null && !paramTypes[i].isInstance(a)) {
-                                return;
-                            }
-                        }
+    /**
+     * Default event consumer, that handles any types of events.
+     * Pre- and Post-hooks are made in order to potentially extend the default functionality by overriding those methods.
+     * @param <E> is the event type.
+     */
+    protected static class DefaultEventConsumer<E> implements EventConsumer<E> {
+        protected final ListenerRegistry bus;
+        protected final Object listenerInstance;
+        protected final Method method;
+        protected final int priority;
+        protected final Class<E> eventType;
+        protected final int paramCount;
 
-                        method.invoke(listenerInstance, args);
-                    }
-                } catch (IllegalAccessException | InvocationTargetException ex) {
-                    throw new RuntimeException("Failed to invoke listener", ex);
+        public DefaultEventConsumer(ListenerRegistry bus, Object listenerInstance, Method method, int priority, Class<E> eventType) {
+            this.bus = bus;
+            this.listenerInstance = listenerInstance;
+            this.method = method;
+            this.priority = priority;
+            this.eventType = eventType;
+            this.paramCount = method.getParameterCount();
+        }
+
+        @Override
+        public void accept(E event) {
+            if (!preInvoke(event)) {
+                return;
+            }
+
+            try {
+                invokeMethod(event);
+                postInvoke(event);
+            } catch (Exception ex) {
+                handleException(event, ex);
+            }
+        }
+
+        /**
+         * Called before method invocation.
+         */
+        protected boolean preInvoke(E event) {
+            return true;
+        }
+
+        /**
+         * Called after successful method invocation.
+         */
+        protected void postInvoke(E event) {
+        }
+
+        protected void handleException(E event, Exception ex) {
+            if (ex instanceof InvocationTargetException ite) {
+                throw new RuntimeException("Failed to invoke listener", ite.getCause());
+            } else {
+                throw new RuntimeException("Failed to invoke listener", ex);
+            }
+        }
+
+        protected void invokeMethod(E event) throws IllegalAccessException, InvocationTargetException {
+            if (paramCount == 1) {
+                method.invoke(listenerInstance, event);
+            } else {
+                invokeWithWrappedArgs(event);
+            }
+        }
+
+        protected void invokeWithWrappedArgs(E event) throws IllegalAccessException, InvocationTargetException {
+            EventWrapper<E> wrapper = bus.getWrapper(eventType);
+            if (wrapper != null) {
+                Object[] extras = wrapper.wrap(event);
+                if (extras.length != paramCount - 1) {
+                    return;
+                }
+
+                Object[] args = new Object[paramCount];
+                args[0] = event;
+                System.arraycopy(extras, 0, args, 1, extras.length);
+                if (validateArgTypes(args)) {
+                    method.invoke(listenerInstance, args);
+                }
+            }
+        }
+
+        protected boolean validateArgTypes(Object[] args) {
+            Class<?>[] paramTypes = method.getParameterTypes();
+            for (int i = 1; i < paramTypes.length; i++) {
+                Object a = args[i];
+                if (a != null && !paramTypes[i].isInstance(a)) {
+                    return false;
                 }
             }
 
-            @Override
-            public Object getInstance() {
-                return listenerInstance;
-            }
+            return true;
+        }
 
-            @Override
-            public int getPriority() {
-                return priority;
-            }
+        @Override
+        public Object getInstance() {
+            return listenerInstance;
+        }
 
-            @Override
-            public Class<E> getEventType() {
-                return eventType;
-            }
-        };
+        @Override
+        public int getPriority() {
+            return priority;
+        }
 
-        bus.internalRegister(eventType, consumer);
-        return consumer;
+        @Override
+        public Class<E> getEventType() {
+            return eventType;
+        }
     }
 
 }
