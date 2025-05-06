@@ -4,23 +4,32 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-// Reflective scanning for now until I figure out something better.
+// This is cursed, but it's worth it.
+// We generate an array of listeners from the generated registry and index each listener with its own unique integer id.
+// Since the event consumer arrays are already pre-generated and pre-sorted, the overall subscription and dispatching becomes significantly faster.
 public class EventRegistry implements ListenerRegistry {
-    protected final Map<Class<?>, List<EventConsumer<?>>> listeners = new ConcurrentHashMap<>();
+    private static final int N = bot.staro.rokit.generated.EventListenerRegistry.EVENT_TYPES.length;
+    @SuppressWarnings("unchecked")
+    private final List<EventConsumer<?>>[] listenerLists = (List<EventConsumer<?>>[]) new List[N];
+    private final EventConsumer<?>[][] listenerArrays = new EventConsumer<?>[N][];
     protected final Map<Class<?>, EventWrapper<?>> wrappers = new HashMap<>();
 
     protected EventRegistry() {
+        for (int i = 0; i < N; i++) {
+            listenerLists[i]  = new CopyOnWriteArrayList<>();
+            listenerArrays[i] = new EventConsumer<?>[0];
+        }
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"unchecked", "ForLoopReplaceableByForEach"})
     protected <E> void post(E event) {
-        List<EventConsumer<?>> list = listeners.get(event.getClass());
-        if (list != null) {
-            for (EventConsumer<?> c : list) {
-                ((EventConsumer<E>) c).accept(event);
+        int id = bot.staro.rokit.generated.EventListenerRegistry.getEventId(event.getClass());
+        if (id >= 0) {
+            EventConsumer<E>[] arr = (EventConsumer<E>[]) listenerArrays[id];
+            for (int i = 0, len = arr.length; i < len; i++) {
+                arr[i].accept(event);
             }
         }
     }
@@ -38,18 +47,21 @@ public class EventRegistry implements ListenerRegistry {
     }
 
     public <T> void internalRegister(Class<T> eventType, EventConsumer<?> c) {
-        listeners.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>())
-                .add(c);
-        listeners.get(eventType).sort(Comparator.<EventConsumer<?>>comparingInt(EventConsumer::getPriority)
-                .reversed());
+        int id = bot.staro.rokit.generated.EventListenerRegistry.getEventId(eventType);
+        if (id >= 0) {
+            List<EventConsumer<?>> list = listenerLists[id];
+            list.add(c);
+            list.sort(Comparator.<EventConsumer<?>>comparingInt(EventConsumer::getPriority).reversed());
+            listenerArrays[id] = list.toArray(new EventConsumer<?>[0]);
+        }
     }
 
     public <T> void internalUnregister(Class<T> eventType, EventConsumer<?> c) {
-        List<EventConsumer<?>> list = listeners.get(eventType);
-        if (list != null) {
-            list.remove(c);
-            if (list.isEmpty()) {
-                listeners.remove(eventType);
+        int id = bot.staro.rokit.generated.EventListenerRegistry.getEventId(eventType);
+        if (id >= 0) {
+            List<EventConsumer<?>> list = listenerLists[id];
+            if (list.remove(c)) {
+                listenerArrays[id] = list.toArray(new EventConsumer<?>[0]);
             }
         }
     }
