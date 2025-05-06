@@ -149,6 +149,18 @@ public class EventListenerProcessor extends AbstractProcessor {
                                 w.write("@Override public void accept(" + evtType + " e) {\n");
                                 w.write("Object[] extras = wrapper.wrap(e);\n");
                                 w.write("if (extras.length != " + extraCount + ") return;\n");
+                                for (int i = 1; i < params.size(); i++) {
+                                    String pt = rawType(params.get(i).asType().toString());
+                                    w.write("if (!(extras[" + (i-1) + "] instanceof " + pt + ")) return;\n");
+                                }
+
+                                w.write("listener." + name + "(e");
+                                for (int i = 1; i < params.size(); i++) {
+                                    String pt = rawType(params.get(i).asType().toString());
+                                    w.write(", (" + pt + ") extras[" + (i-1) + "]");
+                                }
+
+                                w.write(");\n");
                                 w.write("listener." + name + "(e");
                                 for (int i = 1; i < params.size(); i++) {
                                     String pt = rawType(params.get(i).asType().toString());
