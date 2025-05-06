@@ -109,9 +109,7 @@ public class EventListenerProcessor extends AbstractProcessor {
             if (byClass.isEmpty()) {
                 w.write("public static void register(EventRegistry bus, Object subscriber) {}\n\n");
                 w.write("public static void unregister(EventRegistry bus, Object subscriber) {}\n\n");
-            }
-
-            else {
+            } else {
                 w.write("public static void register(EventRegistry bus, Object subscriber) {\n");
                 for (var entry : byClass.entrySet()) {
                     String sub = entry.getKey();
@@ -143,14 +141,6 @@ public class EventListenerProcessor extends AbstractProcessor {
                                     w.write("listener." + name + "(e);\n");
                                 }
 
-                                w.write("}\n");
-                                w.write("@Override public Object getInstance() { return listener; }\n");
-                                w.write("@Override public int getPriority() { return " + prio + "; }\n");
-                                w.write("@Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
-                                w.write("};\n");
-                                w.write("list.add(c);\n");
-                                w.write("bus.internalRegister(" + evtType + ".class, c);\n");
-                                w.write("}\n");
                             } else {
                                 int extraCount = params.size() - 1;
                                 w.write("{\n");
@@ -166,15 +156,16 @@ public class EventListenerProcessor extends AbstractProcessor {
                                 }
 
                                 w.write(");\n");
-                                w.write("}\n");
-                                w.write("@Override public Object getInstance() { return listener; }\n");
-                                w.write("@Override public int getPriority() { return " + prio + "; }\n");
-                                w.write("@Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
-                                w.write("};\n");
-                                w.write("list.add(c);\n");
-                                w.write("bus.internalRegister(" + evtType + ".class, c);\n");
-                                w.write("}\n");
                             }
+
+                            w.write("}\n");
+                            w.write("@Override public Object getInstance() { return listener; }\n");
+                            w.write("@Override public int getPriority() { return " + prio + "; }\n");
+                            w.write("@Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
+                            w.write("};\n");
+                            w.write("list.add(c);\n");
+                            w.write("bus.internalRegister(" + evtType + ".class, c);\n");
+                            w.write("}\n");
                         } else {
                             String handler = extractHandler(anno).replaceFirst(".+\\.", "");
                             w.write("{\n");
@@ -200,6 +191,20 @@ public class EventListenerProcessor extends AbstractProcessor {
                 w.write("}\n");
                 w.write("}\n\n");
             }
+
+            w.write("private static Method getMethod(Object subscriber, String methodName, int paramCount) {\n");
+            w.write("Class<?> cls = subscriber.getClass();\n");
+            w.write("while (cls != null) {\n");
+            w.write("for (Method m : cls.getDeclaredMethods()) {\n");
+            w.write("if (m.getName().equals(methodName) && m.getParameterCount() == paramCount) {\n");
+            w.write("m.setAccessible(true);\n");
+            w.write("return m;\n");
+            w.write("}\n");
+            w.write("}\n");
+            w.write("cls = cls.getSuperclass();\n");
+            w.write("}\n");
+            w.write("throw new RuntimeException(\"Listener method not found: \" + methodName);\n");
+            w.write("}\n\n");
 
             Set<String> eventTypes = new TreeSet<>();
             for (List<MethodInfo> methods : byClass.values()) {
