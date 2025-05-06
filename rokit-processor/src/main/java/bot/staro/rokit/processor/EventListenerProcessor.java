@@ -142,6 +142,7 @@ public class EventListenerProcessor extends AbstractProcessor {
                                 } else {
                                     w.write("listener." + name + "(e);\n");
                                 }
+
                                 w.write("}\n");
                                 w.write("@Override public Object getInstance() { return listener; }\n");
                                 w.write("@Override public int getPriority() { return " + prio + "; }\n");
@@ -171,7 +172,7 @@ public class EventListenerProcessor extends AbstractProcessor {
                                 w.write("@Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
                                 w.write("};\n");
                                 w.write("list.add(c);\n");
-                                w.write("bus.internalRegister(" + evtType + ".class + \", c);\n");
+                                w.write("bus.internalRegister(" + evtType + ".class, c);\n");
                                 w.write("}\n");
                             }
                         } else {
