@@ -42,7 +42,8 @@ public class EventListenerProcessor extends AbstractProcessor {
             }
         }
 
-        if (listenerAnnos.isEmpty()) {
+        boolean last = roundEnv.processingOver();
+        if (listenerAnnos.isEmpty() && !last) {
             return false;
         }
 
@@ -57,7 +58,7 @@ public class EventListenerProcessor extends AbstractProcessor {
             }
         }
 
-        if (byClass.isEmpty()) {
+        if (byClass.isEmpty() && !last) {
             return false;
         }
 
@@ -73,7 +74,13 @@ public class EventListenerProcessor extends AbstractProcessor {
     private void writeRegistry(TypeElement builtin, Set<TypeElement> listenerAnnos, Map<String, List<MethodInfo>> byClass) throws IOException {
         String pkg = "bot.staro.rokit.generated";
         String className = "EventListenerRegistry";
-        JavaFileObject jfo = processingEnv.getFiler().createSourceFile(pkg + "." + className);
+        JavaFileObject jfo;
+        try {
+            jfo = processingEnv.getFiler().createSourceFile(pkg + "." + className);
+        } catch (FilerException e) {
+            return;
+        }
+
         Set<String> handlerFqns = new TreeSet<>();
         handlerFqns.add("bot.staro.rokit.impl.DefaultListenerHandler");
         for (TypeElement anno : listenerAnnos) {
