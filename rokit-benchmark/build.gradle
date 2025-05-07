@@ -20,14 +20,9 @@ repositories {
 dependencies {
     implementation project(':rokit-api')
     implementation project(':rokit-core')
-    compileOnly project(':rokit-processor')
     annotationProcessor project(':rokit-processor')
     implementation "meteordevelopment:orbit:0.2.3"
     implementation("com.google.guava:guava:33.4.8-jre")
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.compilerArgs += ["-Arokit.generatedPackage=net.staro.generated"]
 }
 
 test {

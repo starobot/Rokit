@@ -91,6 +91,22 @@ public class EventListenerProcessor extends AbstractProcessor {
         }
 
         try (Writer w = jfo.openWriter()) {
+            if (byClass.isEmpty()) {
+                w.write("package " + pkg + ";\n\n");
+                w.write("import bot.staro.rokit.EventRegistry;\n");
+                w.write("import bot.staro.rokit.EventConsumer;\n");
+                w.write("import java.util.*;\n");
+                w.write("import java.util.concurrent.ConcurrentHashMap;\n\n");
+                w.write("public final class " + className + " {\n");
+                w.write("    public static final Map<Object, List<EventConsumer<?>>> SUBSCRIBERS = new ConcurrentHashMap<>();\n");
+                w.write("    public static final Class<?>[] EVENT_TYPES = new Class<?>[0];\n\n");
+                w.write("    public static void register(EventRegistry bus, Object subscriber) {}\n");
+                w.write("    public static void unregister(EventRegistry bus, Object subscriber) {}\n");
+                w.write("    public static int getEventId(Class<?> cls) { return -1; }\n");
+                w.write("}\n");
+                return;
+            }
+
             w.write("package " + pkg + ";\n\n");
             w.write("import bot.staro.rokit.EventRegistry;\n");
             w.write("import bot.staro.rokit.EventConsumer;\n");

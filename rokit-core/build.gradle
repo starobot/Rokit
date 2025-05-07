@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation project(':rokit-api')
+    compileOnly project(':rokit-processor')
     annotationProcessor project(':rokit-processor')
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'

@@ -1,10 +1,6 @@
 package bot.staro.rokit;
 
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.*;
 
 // This is cursed, but it's worth it.
 // We generate an array of listeners from the generated registry and index each listener with its own unique integer id.
@@ -18,7 +14,7 @@ public class EventRegistry implements ListenerRegistry {
 
     protected EventRegistry() {
         for (int i = 0; i < N; i++) {
-            listenerLists[i]  = new CopyOnWriteArrayList<>();
+            listenerLists[i]  = new ArrayList<>();
             listenerArrays[i] = new EventConsumer<?>[0];
         }
     }
