@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.Writer;
 import java.util.*;
 
+@SuppressWarnings("unused")
 @AutoService(javax.annotation.processing.Processor.class)
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
 @SupportedAnnotationTypes("*")

@@ -4,24 +4,33 @@ import bot.staro.rokit.rokitbus.RokitListener;
 
 public final class Benchmark {
     public static void main(String[] args) {
-        EventBus rokit = RokitEventBus.builder().build();
+        EventBus eventBus = RokitEventBus.builder().build();
         var rokitListener = new RokitListener();
         var event = new Event();
 
         // JVM warmup
-        BenchmarkUtil.runWarmup(() -> rokit.subscribe(rokitListener), () -> rokit.post(event), () -> rokit.unsubscribe(rokitListener));
+        BenchmarkUtil.runWarmup(() -> eventBus.subscribe(rokitListener), () -> eventBus.post(event), () -> eventBus.unsubscribe(rokitListener));
 
         // 1 Million events
 
         // Rokit
-        rokit.subscribe(rokitListener);
+        eventBus.subscribe(rokitListener);
         var rokitResults = new long[BenchmarkUtil.BENCHMARK_ITERATIONS];
         for (int i = 0; i < BenchmarkUtil.BENCHMARK_ITERATIONS; i++) {
-            rokitResults[i] = BenchmarkUtil.measurePureDispatch(rokit::post, event);
+            rokitResults[i] = BenchmarkUtil.measurePureDispatch(eventBus::post, event);
         }
 
-        rokit.unsubscribe(rokitListener);
-        printResults("Rokit 1_000_000 events", rokitResults);
+        eventBus.unsubscribe(rokitListener);
+        printResults("1 Million events - 1 subscriber", rokitResults);
+
+        for (int i = 0; i < 1000; i++) {
+            eventBus.subscribe(new RokitListener());
+        }
+
+        long l = System.nanoTime();
+        eventBus.post(new Event());
+        double result = (System.nanoTime() - l) / 1_000_000F;
+        System.out.println("1000 subscribers - 1 event " + result);
     }
 
     static void printResults(String testName, long[] results) {

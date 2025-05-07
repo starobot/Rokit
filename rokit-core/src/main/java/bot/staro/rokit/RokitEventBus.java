@@ -6,22 +6,22 @@ public class RokitEventBus extends EventRegistry implements EventBus {
     }
 
     @Override
-    public <E> void post(E event) {
+    public <E> void post(final E event) {
         super.post(event);
     }
 
     @Override
-    public void subscribe(Object subscriber) {
+    public void subscribe(final Object subscriber) {
         super.subscribe(subscriber);
     }
 
     @Override
-    public void unsubscribe(Object subscriber) {
+    public void unsubscribe(final Object subscriber) {
         super.unsubscribe(subscriber);
     }
 
     @Override
-    public boolean isSubscribed(Object subscriber) {
+    public boolean isSubscribed(final Object subscriber) {
         return super.isSubscribed(subscriber);
     }
 
