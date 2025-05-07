@@ -26,6 +26,10 @@ dependencies {
     implementation("com.google.guava:guava:33.4.8-jre")
 }
 
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ["-Arokit.generatedPackage=net.staro.generated"]
+}
+
 test {
     useJUnitPlatform()
 }

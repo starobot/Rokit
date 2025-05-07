@@ -16,6 +16,7 @@ import java.util.*;
 @AutoService(javax.annotation.processing.Processor.class)
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
 @SupportedAnnotationTypes("*")
+@SupportedOptions("rokit.generatedPackage")
 public class EventListenerProcessor extends AbstractProcessor {
     private Elements elementUtils;
 
@@ -72,21 +73,21 @@ public class EventListenerProcessor extends AbstractProcessor {
     }
 
     private void writeRegistry(TypeElement builtin, Set<TypeElement> listenerAnnos, Map<String, List<MethodInfo>> byClass) throws IOException {
-        String pkg = "bot.staro.rokit.generated";
-        String className = "EventListenerRegistry";
-        JavaFileObject jfo;
-        try {
-            jfo = processingEnv.getFiler().createSourceFile(pkg + "." + className);
-        } catch (javax.annotation.processing.FilerException ignored) {
-            return;
-        }
-
         Set<String> handlerFqns = new TreeSet<>();
         handlerFqns.add("bot.staro.rokit.impl.DefaultListenerHandler");
         for (TypeElement anno : listenerAnnos) {
             if (!anno.equals(builtin)) {
                 handlerFqns.add(extractHandler(anno));
             }
+        }
+
+        String pkg = processingEnv.getOptions().getOrDefault("rokit.generatedPackage","bot.staro.rokit.generated");
+        String className = "EventListenerRegistry";
+        JavaFileObject jfo;
+        try {
+            jfo = processingEnv.getFiler().createSourceFile(pkg + "." + className);
+        } catch (FilerException e) {
+            return;
         }
 
         try (Writer w = jfo.openWriter()) {

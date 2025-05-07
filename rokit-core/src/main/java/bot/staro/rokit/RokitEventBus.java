@@ -3,7 +3,6 @@ package bot.staro.rokit;
 // not final in case anyone decides to extend it.
 public class RokitEventBus extends EventRegistry implements EventBus {
     protected RokitEventBus() {
-        super();
     }
 
     @Override
