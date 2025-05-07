@@ -1,60 +1,140 @@
-# ROKIT
+# ROKIT — Compile-time EventBus for Java 21
 
 [![CodeFactor](https://www.codefactor.io/repository/github/starobot/rokit/badge)](https://www.codefactor.io/repository/github/starobot/rokit)
 
-A blazing-fast, zero-reflection, compile-time-generated event bus for Java 21.
+*A blazing-fast, zero-reflection, compile-time generated event bus.*
 
 > [!CAUTION]
-> This is still in beta and is currently being tested in another project.
+> Beta – the API is mostly stable, but minor breaking changes are still possible.
+
+---
+
+## ✨ Features
+* **No reflection in the hot path** – listener dispatch is just an array lookup.
+* **Compile-time registry** – an annotation-processor pre-sorts listeners and assigns numeric event-IDs.
+* **Pluggable wrappers** – unwrap events to extra method parameters without paying a runtime cost.
+* **Extensible annotations** – create your own custom annotations with custom functionality by supplying a handler class.
+* **Java 21**, no external dependencies (aside from `javax.annotation` for the processor).
+
+---
+
+## ⚙️ Installation
+
+<details>
+<summary>Gradle (Groovy DSL)</summary>
+
+```groovy
+repositories {
+    mavenCentral()
+    maven { url "https://jitpack.io" }
+}
+
+dependencies {
+    // for the newest version - check releases.
+    implementation "com.github.starobot.Rokit:rokit-api:version"
+    implementation "com.github.starobot.Rokit:rokit-core:version"
+
+    // If you use loom or specifically if you make a fabric minecraft mod - use "clientAnnotationProcessor" instead of regular "annotationProcessor"
+    annotationProcessor "com.github.starobot.Rokit:rokit-processor:version"
+}
+```
+</details>
 
 ## 🚀 Quick Start
-**Create your bus**  
-```java
- EventBus bus = EventBusBuilder.builder()
-       .build();
-```
-**Define your listener**
-```java
-public class MyListener {
-  @Listener
-  public void onEvent(MyEvent e) {
-    System.out.println("Received: " + e);
-  }
-}
-```
-**Subscribe/unsubscribe
-```java
-var listener = new MyListener();
-bus.subscribe(listener);
 
-bus.post(new MyEvent(/* … */));
-
-bus.unsubscribe(listener);
+### 1. Define an event
+```java
+public record ChatMessage(String text) { }
 ```
 
-🎁 Wrapped (Multi-arg) Events
-
-If your event carries extra data you want injected as method arguments, register a wrapper:
-
+### 2. Create a listener
 ```java
-public class StringEvent {
-  private final String payload;
-  public StringEvent(String payload) { this.payload = payload; }
-  public String getPayload()       { return payload;       }
-}
-
-EventBus bus = EventBusBuilder.builder()
-    .wrapSingle(StringEvent.class, StringEvent::getPayload)
-    .build();
-
-public class PayloadListener {
-  @Listener
-  public void onString(StringEvent e, String payload) {
-    System.out.println("Wrapped payload: " + payload);
-  }
+public class ChatLogger {
+    // Default priority is 0.
+    // The method must be public, otherwise the generated listener registry, won't be able to access it.
+    @Listener
+    public void onChat(ChatMessage e) {
+        System.out.println("Message: " + e.text());
+    }
 }
 ```
 
-//TODO:
-A guide on custom annotations
+### 3. Build a bus and post events
+```java
+EventBus bus = RokitEventBus.builder()
+        .build();
 
+ChatLogger logger = new ChatLogger();
+
+bus.subscribe(logger); // register
+bus.post(new ChatMessage("Hello")); // dispatch
+bus.unsubscribe(logger); // unregister
+```
+
+## 🎁 Wrapped (multi-arg) events
+Sometimes you want to inject extra data from the event directly into the
+listener method without writing boilerplate extractors.
+
+```java
+public record MoveEvent(double x, double y) { }
+
+EventBus bus = RokitEventBus.builder()
+        .wrapSingle(MoveEvent.class, MoveEvent::x) // unwrap ‘x’
+        .wrapSingle(MoveEvent.class, MoveEvent::y) // unwrap ‘y’
+        .build();
+
+public class MotionTracker {
+    @Listener
+    public void onMove(MoveEvent e, double x, double y) {
+        System.out.printf("Moved to %.2f, %.2f%n", x, y);
+    }
+}
+```
+
+- The first parameter is always the **event itself**
+- Additional parameters are filled by the **wrapper chain** you registered
+in the builder.
+- The processor inlines the wrapper call; no reflection, no var-args boxing.
+
+## 🏷️ Custom listener annotations
+Need extra safety checks or async dispatch? Create your own annotation in
+two steps.
+
+### 1. Declare the annotation
+```java
+@ListenerAnnotation(handler = SafeListenerHandler.class)
+@Retention(RetentionPolicy.CLASS)
+@Target(ElementType.METHOD)
+public @interface SafeListener {
+    int priority() default 0;
+}
+```
+
+### 2. Implement the handler
+```java
+public class SafeListenerHandler implements AnnotationHandler {
+    @Override
+    public <E> EventConsumer<E> createConsumer(ListenerRegistry bus, Object listenerInstance, Method method, int priority, Class<E> eventType) {
+        return new EventConsumer<>() {
+            @Override
+            public void accept(E event) {
+                // Any additional functionality here before invoking the the method.
+
+                try {
+                    method.invoke(listenerInstance, event);
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }
+
+            @Override public Object getInstance() { return listenerInstance; }
+            @Override public int getPriority() { return priority; }
+            @Override public Class<E> getEventType() { return eventType; }
+        };
+    }
+}
+```
+
+The processor will detect @SafeListener, delegate consumer creation to
+SafeListenerHandler, and sort it into the registry exactly like a
+built-in @Listener.
