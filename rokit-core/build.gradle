@@ -5,20 +5,11 @@ plugins {
 
 dependencies {
     implementation project(':rokit-api')
-    compileOnly project(':rokit-processor')
-    annotationProcessor project(':rokit-processor')
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
 }
 
 java {
-    sourceSets.main {
-        java {
-            srcDir "$buildDir/generated/sources/annotationProcessor/java/main"
-        }
-    }
-}
-
-tasks.named('sourcesJar') {
-    dependsOn tasks.named('compileJava')
+    withSourcesJar()
+    withJavadocJar()
 }

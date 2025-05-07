@@ -1,12 +1,18 @@
 package bot.staro.rokit;
 
+import bot.staro.rokit.gen.GeneratedRegistry;
+
 import java.util.*;
 
 // This is cursed, but it's worth it.
 // We generate an array of listeners from the generated registry and index each listener with its own unique integer id.
 // Since the event consumer arrays are already pre-generated and pre-sorted, the overall subscription and dispatching becomes significantly faster.
 public class EventRegistry implements ListenerRegistry {
-    private static final int N = bot.staro.rokit.generated.EventListenerRegistry.EVENT_TYPES.length;
+    private static final GeneratedRegistry REGISTRY = ServiceLoader.load(GeneratedRegistry.class)
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("No Rokit listener registry found on class‑path"));
+
+    private static final int N = REGISTRY.eventTypes().length;
     @SuppressWarnings("unchecked")
     private final List<EventConsumer<?>>[] listenerLists = (List<EventConsumer<?>>[]) new List[N];
     private final EventConsumer<?>[][] listenerArrays = new EventConsumer<?>[N][];
@@ -19,31 +25,31 @@ public class EventRegistry implements ListenerRegistry {
         }
     }
 
-    @SuppressWarnings({"unchecked", "ForLoopReplaceableByForEach"})
+    @SuppressWarnings({"unchecked"})
     protected <E> void post(E event) {
-        int id = bot.staro.rokit.generated.EventListenerRegistry.getEventId(event.getClass());
+        int id = REGISTRY.getEventId(event.getClass());
         if (id >= 0) {
             EventConsumer<E>[] arr = (EventConsumer<E>[]) listenerArrays[id];
-            for (int i = 0, len = arr.length; i < len; i++) {
-                arr[i].accept(event);
+            for (EventConsumer<E> c : arr) {
+                c.accept(event);
             }
         }
     }
 
     protected void subscribe(Object subscriber) {
-        bot.staro.rokit.generated.EventListenerRegistry.register(this, subscriber);
+        REGISTRY.register(this, subscriber);
     }
 
     protected void unsubscribe(Object subscriber) {
-        bot.staro.rokit.generated.EventListenerRegistry.unregister(this, subscriber);
+        REGISTRY.unregister(this, subscriber);
     }
 
     protected boolean isSubscribed(Object subscriber) {
-        return bot.staro.rokit.generated.EventListenerRegistry.SUBSCRIBERS.containsKey(subscriber);
+        return REGISTRY.subscribers().containsKey(subscriber);
     }
 
-    public <T> void internalRegister(Class<T> eventType, EventConsumer<?> c) {
-        int id = bot.staro.rokit.generated.EventListenerRegistry.getEventId(eventType);
+    public <T> void internalRegister(Class<T> type, EventConsumer<?> c) {
+        int id = REGISTRY.getEventId(type);
         if (id >= 0) {
             List<EventConsumer<?>> list = listenerLists[id];
             list.add(c);
@@ -52,8 +58,8 @@ public class EventRegistry implements ListenerRegistry {
         }
     }
 
-    public <T> void internalUnregister(Class<T> eventType, EventConsumer<?> c) {
-        int id = bot.staro.rokit.generated.EventListenerRegistry.getEventId(eventType);
+    public <T> void internalUnregister(Class<T> type, EventConsumer<?> c) {
+        int id = REGISTRY.getEventId(type);
         if (id >= 0) {
             List<EventConsumer<?>> list = listenerLists[id];
             if (list.remove(c)) {

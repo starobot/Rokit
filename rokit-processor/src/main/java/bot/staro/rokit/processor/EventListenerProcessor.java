@@ -8,267 +8,242 @@ import javax.lang.model.element.*;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
+import javax.tools.StandardLocation;
 import java.io.IOException;
 import java.io.Writer;
 import java.util.*;
 
-@SuppressWarnings("unused")
 @AutoService(javax.annotation.processing.Processor.class)
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
 @SupportedAnnotationTypes("*")
 @SupportedOptions("rokit.generatedPackage")
-public class EventListenerProcessor extends AbstractProcessor {
-    private Elements elementUtils;
+public final class EventListenerProcessor extends AbstractProcessor {
+    private static final String DEF_PKG = "bot.staro.rokit.generated";
+    private static final String GEN_NAME = "EventListenerRegistry";
+    private static final String SERVICE_PATH = "META-INF/services/bot.staro.rokit.gen.GeneratedRegistry";
+    private Elements elements;
 
     @Override
     public synchronized void init(ProcessingEnvironment env) {
         super.init(env);
-        elementUtils = env.getElementUtils();
+        elements = env.getElementUtils();
     }
 
     @Override
-    public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
+    public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment env) {
         Set<TypeElement> listenerAnnos = new LinkedHashSet<>();
-        TypeElement builtin = elementUtils.getTypeElement("bot.staro.rokit.Listener");
+        TypeElement builtin = elements.getTypeElement("bot.staro.rokit.Listener");
         if (builtin != null) {
             listenerAnnos.add(builtin);
         }
 
-        TypeElement marker = elementUtils.getTypeElement("bot.staro.rokit.ListenerAnnotation");
+        TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
         if (marker != null) {
-            for (Element e : roundEnv.getElementsAnnotatedWith(marker)) {
+            for (Element e : env.getElementsAnnotatedWith(marker)) {
                 if (e.getKind() == ElementKind.ANNOTATION_TYPE) {
                     listenerAnnos.add((TypeElement) e);
                 }
             }
         }
 
-        boolean last = roundEnv.processingOver();
-        if (listenerAnnos.isEmpty() && !last) {
-            return false;
-        }
-
         Map<String, List<MethodInfo>> byClass = new LinkedHashMap<>();
         for (TypeElement anno : listenerAnnos) {
-            for (Element e : roundEnv.getElementsAnnotatedWith(anno)) {
-                if (e instanceof ExecutableElement method) {
-                    TypeElement cls = (TypeElement) method.getEnclosingElement();
-                    byClass.computeIfAbsent(cls.getQualifiedName().toString(), k -> new ArrayList<>())
-                            .add(new MethodInfo(anno, method));
+            for (Element e : env.getElementsAnnotatedWith(anno)) {
+                if (e instanceof ExecutableElement m) {
+                    String owner = ((TypeElement) m.getEnclosingElement()).getQualifiedName().toString();
+                    byClass.computeIfAbsent(owner, k -> new java.util.ArrayList<>()).add(new MethodInfo(anno, m));
                 }
             }
         }
 
-        if (byClass.isEmpty() && !last) {
+        if (byClass.isEmpty()) {
             return false;
         }
 
         try {
-            writeRegistry(builtin, listenerAnnos, byClass);
+            writeFiles(builtin, listenerAnnos, byClass);
         } catch (IOException ex) {
-            processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, "Failed to write EventListenerRegistry: " + ex);
+            processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, "Rokit processor error: " + ex);
         }
 
         return true;
     }
 
-    private void writeRegistry(TypeElement builtin, Set<TypeElement> listenerAnnos, Map<String, List<MethodInfo>> byClass) throws IOException {
-        Set<String> handlerFqns = new TreeSet<>();
-        handlerFqns.add("bot.staro.rokit.impl.DefaultListenerHandler");
-        for (TypeElement anno : listenerAnnos) {
-            if (!anno.equals(builtin)) {
-                handlerFqns.add(extractHandler(anno));
-            }
+    private void writeFiles(TypeElement builtin,
+                            Set<TypeElement> listenerAnnos,
+                            Map<String, List<MethodInfo>> byClass) throws IOException {
+
+        String pkg = processingEnv.getOptions().getOrDefault("rokit.generatedPackage", DEF_PKG);
+        try (Writer w = processingEnv.getFiler()
+                .createResource(StandardLocation.CLASS_OUTPUT, "", SERVICE_PATH)
+                .openWriter()) {
+            w.write(pkg + '.' + GEN_NAME);
         }
 
-        String pkg = processingEnv.getOptions().getOrDefault("rokit.generatedPackage","bot.staro.rokit.generated");
-        String className = "EventListenerRegistry";
         JavaFileObject jfo;
         try {
-            jfo = processingEnv.getFiler().createSourceFile(pkg + "." + className);
-        } catch (FilerException e) {
+            jfo = processingEnv.getFiler().createSourceFile(pkg + '.' + GEN_NAME);
+        } catch (FilerException ex) {
             return;
         }
 
+        Set<String> handlers = new TreeSet<>();
+        handlers.add("bot.staro.rokit.impl.DefaultListenerHandler");
+        for (TypeElement anno : listenerAnnos) {
+            if (!anno.equals(builtin)) {
+                handlers.add(extractHandler(anno));
+            }
+        }
+
         try (Writer w = jfo.openWriter()) {
-            if (byClass.isEmpty()) {
-                w.write("package " + pkg + ";\n\n");
-                w.write("import bot.staro.rokit.EventRegistry;\n");
-                w.write("import bot.staro.rokit.EventConsumer;\n");
-                w.write("import java.util.*;\n");
-                w.write("import java.util.concurrent.ConcurrentHashMap;\n\n");
-                w.write("public final class " + className + " {\n");
-                w.write("    public static final Map<Object, List<EventConsumer<?>>> SUBSCRIBERS = new ConcurrentHashMap<>();\n");
-                w.write("    public static final Class<?>[] EVENT_TYPES = new Class<?>[0];\n\n");
-                w.write("    public static void register(EventRegistry bus, Object subscriber) {}\n");
-                w.write("    public static void unregister(EventRegistry bus, Object subscriber) {}\n");
-                w.write("    public static int getEventId(Class<?> cls) { return -1; }\n");
-                w.write("}\n");
-                return;
-            }
-
             w.write("package " + pkg + ";\n\n");
-            w.write("import bot.staro.rokit.EventRegistry;\n");
-            w.write("import bot.staro.rokit.EventConsumer;\n");
-            w.write("import bot.staro.rokit.EventWrapper;\n");
-            w.write("import java.util.Map;\n");
-            w.write("import java.util.List;\n");
-            w.write("import java.util.ArrayList;\n");
+            w.write("import bot.staro.rokit.*;\n");
+            w.write("import bot.staro.rokit.gen.GeneratedRegistry;\n");
+            w.write("import java.util.*;\n");
             w.write("import java.util.concurrent.ConcurrentHashMap;\n");
-            w.write("import java.lang.reflect.Method;\n\n");
-            for (String fqn : handlerFqns) {
-                w.write("import " + fqn + ";\n");
+            w.write("import java.lang.reflect.Method;\n");
+            for (String h : handlers) {
+                w.write("import " + h + ";\n");
             }
 
-            w.write("\n");
-            w.write("public final class " + className + " {\n");
-            w.write("public static final Map<Object,List<EventConsumer<?>>> SUBSCRIBERS = new ConcurrentHashMap<>();\n\n");
-            if (byClass.isEmpty()) {
-                w.write("public static void register(EventRegistry bus, Object subscriber) {}\n\n");
-                w.write("public static void unregister(EventRegistry bus, Object subscriber) {}\n\n");
-            } else {
-                w.write("public static void register(EventRegistry bus, Object subscriber) {\n");
-                for (var entry : byClass.entrySet()) {
-                    String sub = entry.getKey();
-                    String pkgStr = elementUtils
-                            .getPackageOf(elementUtils.getTypeElement(sub))
-                            .getQualifiedName().toString();
-                    String accessor = elementUtils
-                            .getTypeElement(sub)
-                            .getSimpleName() + "EventAccessor";
-                    w.write("if (subscriber instanceof " + sub + ") {\n");
-                    w.write(sub + " listener = (" + sub + ") subscriber;\n");
-                    w.write("List<EventConsumer<?>> list = new ArrayList<>();\n");
-                    for (MethodInfo mi : entry.getValue()) {
-                        ExecutableElement m = mi.method();
-                        TypeElement anno = mi.annotation();
-                        List<? extends VariableElement> params = m.getParameters();
-                        String evtType = rawType(params.getFirst().asType().toString());
-                        String name = m.getSimpleName().toString();
-                        int prio = extractPriority(m, anno);
-                        boolean priv = m.getModifiers().contains(Modifier.PRIVATE);
-                        if (anno.equals(builtin)) {
-                            if (params.size() == 1) {
-                                w.write("{\n");
-                                w.write("EventConsumer<" + evtType + "> c = new EventConsumer<>() {\n");
-                                w.write("@Override public void accept(" + evtType + " e) {\n");
-                                if (priv) {
-                                    w.write(pkgStr + "." + accessor + "." + name + "Accessor(listener, e);\n");
-                                } else {
-                                    w.write("listener." + name + "(e);\n");
-                                }
+            w.write("\npublic final class " + GEN_NAME + " implements GeneratedRegistry {\n");
+            w.write("    public static final Map<Object, List<EventConsumer<?>>> SUBSCRIBERS = new ConcurrentHashMap<>();\n\n");
+            w.write("    @Override\n");
+            w.write("    public void register(ListenerRegistry bus, Object sub) {\n");
+            for (var entry : byClass.entrySet()) {
+                String owner = entry.getKey();
+                String simple = elements.getTypeElement(owner).getSimpleName().toString();
+                String accessor = simple + "EventAccessor";
+                String ownerPkg = elements.getPackageOf(elements.getTypeElement(owner))
+                        .getQualifiedName().toString();
 
+                w.write("        if (sub instanceof " + owner + " l) {\n");
+                w.write("            List<EventConsumer<?>> list = new ArrayList<>();\n");
+
+                for (MethodInfo mi : entry.getValue()) {
+                    ExecutableElement m = mi.method();
+                    String evtType = raw(m.getParameters().getFirst().asType().toString());
+                    String name = m.getSimpleName().toString();
+                    int prio = extractPriority(m, mi.annotation());
+                    boolean priv = m.getModifiers().contains(Modifier.PRIVATE);
+
+                    if (mi.annotation().equals(builtin)) {
+                        if (m.getParameters().size() == 1) {
+                            w.write("            {\n");
+                            w.write("                EventConsumer<" + evtType + "> c = new EventConsumer<>() {\n");
+                            w.write("                    @Override public void accept(" + evtType + " e) {\n");
+                            if (priv) {
+                                w.write("                        " + ownerPkg + "." + accessor + "." + name + "Accessor(l, e);\n");
                             } else {
-                                int extraCount = params.size() - 1;
-                                w.write("{\n");
-                                w.write("EventConsumer<" + evtType + "> c = new EventConsumer<>() {\n");
-                                w.write("private final EventWrapper<" + evtType + "> wrapper = bus.getWrapper(" + evtType + ".class);\n");
-                                w.write("@Override public void accept(" + evtType + " e) {\n");
-                                w.write("Object[] extras = wrapper.wrap(e);\n");
-                                w.write("if (extras.length != " + extraCount + ") return;\n");
-                                for (int i = 1; i < params.size(); i++) {
-                                    String pt = rawType(params.get(i).asType().toString());
-                                    w.write("if (!(extras[" + (i-1) + "] instanceof " + pt + ")) return;\n");
-                                }
-
-                                w.write("listener." + name + "(e");
-                                for (int i = 1; i < params.size(); i++) {
-                                    String pt = rawType(params.get(i).asType().toString());
-                                    w.write(", (" + pt + ") extras[" + (i-1) + "]");
-                                }
-
-                                w.write(");\n");
-                                w.write("listener." + name + "(e");
-                                for (int i = 1; i < params.size(); i++) {
-                                    String pt = rawType(params.get(i).asType().toString());
-                                    w.write(", (" + pt + ") extras[" + (i - 1) + "]");
-                                }
-
-                                w.write(");\n");
+                                w.write("                        l." + name + "(e);\n");
+                            }
+                        } else {
+                            int extras = m.getParameters().size() - 1;
+                            w.write("            {\n");
+                            w.write("                EventConsumer<" + evtType + "> c = new EventConsumer<>() {\n");
+                            w.write("                    final EventWrapper<" + evtType + "> w = bus.getWrapper(" + evtType + ".class);\n");
+                            w.write("                    @Override public void accept(" + evtType + " e) {\n");
+                            w.write("                        Object[] x = w.wrap(e);\n");
+                            w.write("                        if (x.length != " + extras + ") { return; }\n");
+                            for (int i = 1; i < m.getParameters().size(); i++) {
+                                String pt = raw(m.getParameters().get(i).asType().toString());
+                                w.write("                        if (!(x[" + (i - 1) + "] instanceof " + pt + ")) { return; }\n");
                             }
 
-                            w.write("}\n");
-                            w.write("@Override public Object getInstance() { return listener; }\n");
-                            w.write("@Override public int getPriority() { return " + prio + "; }\n");
-                            w.write("@Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
-                            w.write("};\n");
-                            w.write("list.add(c);\n");
-                            w.write("bus.internalRegister(" + evtType + ".class, c);\n");
-                            w.write("}\n");
-                        } else {
-                            String handler = extractHandler(anno).replaceFirst(".+\\.", "");
-                            w.write("{\n");
-                            w.write("Method method = getMethod(listener, \"" + name + "\", " + params.size() + ");\n");
-                            w.write("var consumer = new " + handler +
-                                    "().createConsumer(bus, listener, method, " + prio + ", " + evtType + ".class);\n");
-                            w.write("list.add(consumer);\n");
-                            w.write("}\n");
-                        }
-                    }
+                            w.write("                        l." + name + "(e");
+                            for (int i = 1; i < m.getParameters().size(); i++) {
+                                String pt = raw(m.getParameters().get(i).asType().toString());
+                                w.write(", (" + pt + ") x[" + (i - 1) + "]");
+                            }
 
-                    w.write("SUBSCRIBERS.put(listener, list);\n");
-                    w.write("}\n");
+                            w.write(");\n");
+                        }
+
+                        w.write("                    }\n");
+                        w.write("                    @Override public Object getInstance() { return l; }\n");
+                        w.write("                    @Override public int getPriority() { return " + prio + "; }\n");
+                        w.write("                    @Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
+                        w.write("                };\n");
+                        w.write("                list.add(c);\n");
+                        w.write("                bus.internalRegister(" + evtType + ".class, c);\n");
+                        w.write("            }\n");
+                    } else {
+                        String h = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
+                        w.write("            {\n");
+                        w.write("                Method mtd = getMethod(l, \"" + name + "\", " + m.getParameters().size() + ");\n");
+                        w.write("                var c = new " + h + "().createConsumer(bus, l, mtd, " + prio + ", " + evtType + ".class);\n");
+                        w.write("                list.add(c);\n");
+                        w.write("            }\n");
+                    }
                 }
 
-                w.write("}\n\n");
-                w.write("public static void unregister(EventRegistry bus, Object subscriber) {\n");
-                w.write("List<EventConsumer<?>> list = SUBSCRIBERS.remove(subscriber);\n");
-                w.write("if (list != null) {\n");
-                w.write("for (EventConsumer<?> c : list) {\n");
-                w.write("bus.internalUnregister(c.getEventType(), c);\n");
-                w.write("}\n");
-                w.write("}\n");
-                w.write("}\n\n");
+                w.write("            SUBSCRIBERS.put(l, list);\n");
+                w.write("        }\n");
             }
 
-            w.write("private static Method getMethod(Object subscriber, String methodName, int paramCount) {\n");
-            w.write("Class<?> cls = subscriber.getClass();\n");
-            w.write("while (cls != null) {\n");
-            w.write("for (Method m : cls.getDeclaredMethods()) {\n");
-            w.write("if (m.getName().equals(methodName) && m.getParameterCount() == paramCount) {\n");
-            w.write("m.setAccessible(true);\n");
-            w.write("return m;\n");
-            w.write("}\n");
-            w.write("}\n");
-            w.write("cls = cls.getSuperclass();\n");
-            w.write("}\n");
-            w.write("throw new RuntimeException(\"Listener method not found: \" + methodName);\n");
-            w.write("}\n\n");
+            w.write("    }\n\n");
 
-            Set<String> eventTypes = new TreeSet<>();
+            w.write("    @Override\n");
+            w.write("    public void unregister(ListenerRegistry bus, Object sub) {\n");
+            w.write("        List<EventConsumer<?>> list = SUBSCRIBERS.remove(sub);\n");
+            w.write("        if (list != null) {\n");
+            w.write("            for (EventConsumer<?> c : list) {\n");
+            w.write("                bus.internalUnregister(c.getEventType(), c);\n");
+            w.write("            }\n");
+            w.write("        }\n");
+            w.write("    }\n\n");
+
+            w.write("    private static Method getMethod(Object o, String n, int p) {\n");
+            w.write("        Class<?> c = o.getClass();\n");
+            w.write("        while (c != null) {\n");
+            w.write("            for (Method m : c.getDeclaredMethods()) {\n");
+            w.write("                if (m.getName().equals(n) && m.getParameterCount() == p) {\n");
+            w.write("                    m.setAccessible(true);\n");
+            w.write("                    return m;\n");
+            w.write("                }\n");
+            w.write("            }\n");
+            w.write("            c = c.getSuperclass();\n");
+            w.write("        }\n");
+            w.write("        throw new RuntimeException(n);\n");
+            w.write("    }\n\n");
+            Set<String> types = new TreeSet<>();
             for (List<MethodInfo> methods : byClass.values()) {
                 for (MethodInfo mi : methods) {
-                    String raw = rawType(mi.method().getParameters().getFirst().asType().toString());
-                    eventTypes.add(raw + ".class");
+                    types.add(raw(mi.method().getParameters().getFirst().asType().toString()) + ".class");
                 }
             }
 
-            w.write("public static final Class<?>[] EVENT_TYPES = new Class<?>[]{\n");
-            for (String et : eventTypes) {
-                w.write(et + ",\n");
+            w.write("    public static final Class<?>[] EVENT_TYPES = {\n");
+            for (String t : types) {
+                w.write("        " + t + ",\n");
             }
 
-            w.write("};\n\n");
-            w.write("public static int getEventId(Class<?> cls) {\n");
-            int idx = 0;
-            for (String et : eventTypes) {
-                String cn = et.substring(0, et.length() - ".class".length());
-                w.write("if (cls == " + cn + ".class) return " + (idx++) + ";\n");
+            w.write("    };\n\n");
+
+            w.write("    @Override\n");
+            w.write("    public int getEventId(Class<?> c) {\n");
+            int id = 0;
+            for (String t : types) {
+                String cls = t.substring(0, t.length() - 6);
+                w.write("        if (c == " + cls + ".class) { return " + id + "; }\n");
+                id++;
             }
 
-            w.write("return -1;\n");
-            w.write("}\n\n");
+            w.write("        return -1;\n");
+            w.write("    }\n\n");
+
+            w.write("    @Override public Class<?>[] eventTypes() { return EVENT_TYPES; }\n");
+            w.write("    @Override public java.util.Map<Object, java.util.List<EventConsumer<?>>> subscribers() { return SUBSCRIBERS; }\n");
             w.write("}\n");
         }
     }
 
-
     private String extractHandler(TypeElement anno) {
-        TypeElement marker = elementUtils.getTypeElement("bot.staro.rokit.ListenerAnnotation");
+        TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
         for (AnnotationMirror am : anno.getAnnotationMirrors()) {
             if (am.getAnnotationType().asElement().equals(marker)) {
-                for (Map.Entry<? extends ExecutableElement, ? extends AnnotationValue> ev : am.getElementValues().entrySet()) {
-                    if ("handler".equals(ev.getKey().getSimpleName().toString())) {
+                for (var ev : am.getElementValues().entrySet()) {
+                    if ("handler".contentEquals(ev.getKey().getSimpleName())) {
                         return ev.getValue().getValue().toString();
                     }
                 }
@@ -281,8 +256,8 @@ public class EventListenerProcessor extends AbstractProcessor {
     private int extractPriority(ExecutableElement m, TypeElement anno) {
         for (AnnotationMirror am : m.getAnnotationMirrors()) {
             if (am.getAnnotationType().asElement().equals(anno)) {
-                for (Map.Entry<? extends ExecutableElement, ? extends AnnotationValue> ev : am.getElementValues().entrySet()) {
-                    if ("priority".equals(ev.getKey().getSimpleName().toString())) {
+                for (var ev : am.getElementValues().entrySet()) {
+                    if ("priority".contentEquals(ev.getKey().getSimpleName())) {
                         return Integer.parseInt(ev.getValue().getValue().toString());
                     }
                 }
@@ -292,9 +267,9 @@ public class EventListenerProcessor extends AbstractProcessor {
         return 0;
     }
 
-    private String rawType(String full) {
-        int i = full.indexOf('<');
-        return i < 0 ? full : full.substring(0, i);
+    private static String raw(String fqn) {
+        int idx = fqn.indexOf('<');
+        return idx < 0 ? fqn : fqn.substring(0, idx);
     }
 
     private record MethodInfo(TypeElement annotation, ExecutableElement method) {}
