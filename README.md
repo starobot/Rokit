@@ -76,17 +76,24 @@ Sometimes you want to inject extra data from the event directly into the
 listener method without writing boilerplate extractors.
 
 ```java
-public record MoveEvent(double x, double y) { }
+public record MoveEvent(Vector vec) {}
+
+public record PacketHolderEvent(Packet packet, Packet otherPacket) {}
 
 EventBus bus = RokitEventBus.builder()
-        .wrapSingle(MoveEvent.class, MoveEvent::x) // unwrap ‘x’
-        .wrapSingle(MoveEvent.class, MoveEvent::y) // unwrap ‘y’
+        .wrap(MoveEvent.class, MoveEvent::vec) // unwrap 'vec' object
+        .wrap(PacketHolderEvent.class, event -> new Object[]{event.packet(), event.otherPacket()}) // unwrap multiple objects from the same event
         .build();
 
 public class MotionTracker {
     @Listener
     public void onMove(MoveEvent e, double x, double y) {
         System.out.printf("Moved to %.2f, %.2f%n", x, y);
+    }
+
+    @Listener
+    public void onPacket(PacketHolderEvent event, Packet packet, Packet otherPacket) {
+        // Do something.
     }
 }
 ```
