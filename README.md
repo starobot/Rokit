@@ -87,8 +87,8 @@ EventBus bus = RokitEventBus.builder()
 
 public class MotionTracker {
     @Listener
-    public void onMove(MoveEvent e, double x, double y) {
-        System.out.printf("Moved to %.2f, %.2f%n", x, y);
+    public void onMove(MoveEvent e, Vector vec) {
+        System.out.printf("Moved to %.2f, %.2f%n", vec.x, vec.y);
     }
 
     @Listener
