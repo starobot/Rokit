@@ -135,7 +135,6 @@ public class SafeListenerHandler implements AnnotationHandler {
             }
 
             @Override public Object getInstance() { return listenerInstance; }
-            @Override public int getPriority() { return priority; }
             @Override public Class<E> getEventType() { return eventType; }
         };
     }
