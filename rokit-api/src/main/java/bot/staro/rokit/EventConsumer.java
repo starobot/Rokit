@@ -11,8 +11,6 @@ public interface EventConsumer<E> {
      */
     void accept(E event);
 
-    Object getInstance();
-
     int getPriority();
 
     Class<E> getEventType();

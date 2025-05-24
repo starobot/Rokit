@@ -108,10 +108,11 @@ public final class EventListenerProcessor extends AbstractProcessor {
             }
 
             w.write("\npublic final class " + GEN_NAME + " implements GeneratedRegistry {\n");
-            w.write("    public static final Map<Object, List<EventConsumer<?>>> SUBSCRIBERS = new ConcurrentHashMap<>();\n\n");
+            w.write("    public static final Map<Object, EventConsumer<?>[]> SUBSCRIBERS = new ConcurrentHashMap<>();\n\n");
             w.write("    @Override\n");
             w.write("    public void register(ListenerRegistry bus, Object sub) {\n");
             for (var entry : byClass.entrySet()) {
+                int n = entry.getValue().size();
                 String owner = entry.getKey();
                 String simple = elements.getTypeElement(owner).getSimpleName().toString();
                 String accessor = simple + "EventAccessor";
@@ -119,7 +120,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         .getQualifiedName().toString();
 
                 w.write("        if (sub instanceof " + owner + " l) {\n");
-                w.write("            List<EventConsumer<?>> list = new ArrayList<>();\n");
+                w.write("            EventConsumer<?>[] arr = new EventConsumer<?>[" + n + "];\n");
+                w.write("            int __idx = 0;\n");
 
                 for (MethodInfo mi : entry.getValue()) {
                     ExecutableElement m = mi.method();
@@ -161,11 +163,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         }
 
                         w.write("                    }\n");
-                        w.write("                    @Override public Object getInstance() { return l; }\n");
                         w.write("                    @Override public int getPriority() { return " + prio + "; }\n");
                         w.write("                    @Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
                         w.write("                };\n");
-                        w.write("                list.add(c);\n");
+                        w.write("                arr[__idx++] = c;\n");
                         w.write("                bus.internalRegister(" + evtType + ".class, c);\n");
                         w.write("            }\n");
                     } else {
@@ -173,12 +174,12 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         w.write("            {\n");
                         w.write("                Method mtd = getMethod(l, \"" + name + "\", " + m.getParameters().size() + ");\n");
                         w.write("                var c = new " + h + "().createConsumer(bus, l, mtd, " + prio + ", " + evtType + ".class);\n");
-                        w.write("                list.add(c);\n");
+                        w.write("                arr[__idx++] = c;\n");
                         w.write("            }\n");
                     }
                 }
 
-                w.write("            SUBSCRIBERS.put(l, list);\n");
+                w.write("            SUBSCRIBERS.put(l, arr);\n");
                 w.write("        }\n");
             }
 
@@ -186,9 +187,9 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
             w.write("    @Override\n");
             w.write("    public void unregister(ListenerRegistry bus, Object sub) {\n");
-            w.write("        List<EventConsumer<?>> list = SUBSCRIBERS.remove(sub);\n");
-            w.write("        if (list != null) {\n");
-            w.write("            for (EventConsumer<?> c : list) {\n");
+            w.write("        EventConsumer<?>[] arr = SUBSCRIBERS.remove(sub);\n");
+            w.write("        if (arr != null) {\n");
+            w.write("            for (EventConsumer<?> c : arr) {\n");
             w.write("                bus.internalUnregister(c.getEventType(), c);\n");
             w.write("            }\n");
             w.write("        }\n");
@@ -234,7 +235,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
             w.write("    }\n\n");
 
             w.write("    @Override public Class<?>[] eventTypes() { return EVENT_TYPES; }\n");
-            w.write("    @Override public java.util.Map<Object, java.util.List<EventConsumer<?>>> subscribers() { return SUBSCRIBERS; }\n");
+            w.write("    @Override public Map<Object, bot.staro.rokit.EventConsumer<?>[]> subscribers() { return SUBSCRIBERS; }\n");
+
             w.write("}\n");
         }
     }

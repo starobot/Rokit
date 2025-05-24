@@ -94,11 +94,6 @@ public abstract class BaseEventConsumer<E> implements EventConsumer<E> {
     }
 
     @Override
-    public Object getInstance() {
-        return listener;
-    }
-
-    @Override
     public int getPriority() {
         return priority;
     }

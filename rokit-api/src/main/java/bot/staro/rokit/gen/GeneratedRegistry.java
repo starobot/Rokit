@@ -3,7 +3,6 @@ package bot.staro.rokit.gen;
 import bot.staro.rokit.EventConsumer;
 import bot.staro.rokit.ListenerRegistry;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,6 +18,6 @@ public interface GeneratedRegistry {
 
     Class<?>[] eventTypes();
 
-    Map<Object, List<EventConsumer<?>>> subscribers();
+    Map<Object, EventConsumer<?>[]> subscribers();
 
 }
