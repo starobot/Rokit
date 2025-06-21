@@ -130,9 +130,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
                             throw new RuntimeException(e);
                         }
                     });
+            w.write("        if (tmp.isEmpty()) return;\n");
             w.write("        bot.staro.rokit.EventConsumer<?>[] arr =\n");
             w.write("                tmp.toArray(new bot.staro.rokit.EventConsumer<?>[0]);\n");
-            w.write("        if (arr.length != 0) SUBSCRIBERS.put(sub, arr);\n");
+            w.write("        SUBSCRIBERS.put(sub, arr);\n");
             w.write("    }\n\n");
 
             w.write("    @Override\n");
