@@ -23,6 +23,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
     private static final String GEN_NAME = "EventListenerRegistry";
     private static final String SERVICE_PATH = "META-INF/services/bot.staro.rokit.gen.GeneratedRegistry";
     private Elements elements;
+    private boolean firstBranch;
 
     @Override
     public synchronized void init(ProcessingEnvironment env) {
@@ -109,80 +110,29 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
             w.write("\npublic final class " + GEN_NAME + " implements GeneratedRegistry {\n");
             w.write("    public static final Map<Object, EventConsumer<?>[]> SUBSCRIBERS = new ConcurrentHashMap<>();\n\n");
+
+            int totalMethods = byClass.values().stream().mapToInt(List::size).sum();
             w.write("    @Override\n");
             w.write("    public void register(ListenerRegistry bus, Object sub) {\n");
-            for (var entry : byClass.entrySet()) {
-                int n = entry.getValue().size();
-                String owner = entry.getKey();
-                String simple = elements.getTypeElement(owner).getSimpleName().toString();
-                String accessor = simple + "EventAccessor";
-                String ownerPkg = elements.getPackageOf(elements.getTypeElement(owner))
-                        .getQualifiedName().toString();
-
-                w.write("        if (sub instanceof " + owner + " l) {\n");
-                w.write("            EventConsumer<?>[] arr = new EventConsumer<?>[" + n + "];\n");
-                w.write("            int __idx = 0;\n");
-
-                for (MethodInfo mi : entry.getValue()) {
-                    ExecutableElement m = mi.method();
-                    String evtType = raw(m.getParameters().getFirst().asType().toString());
-                    String name = m.getSimpleName().toString();
-                    int prio = extractPriority(m, mi.annotation());
-                    boolean priv = m.getModifiers().contains(Modifier.PRIVATE);
-
-                    if (mi.annotation().equals(builtin)) {
-                        if (m.getParameters().size() == 1) {
-                            w.write("            {\n");
-                            w.write("                EventConsumer<" + evtType + "> c = new EventConsumer<>() {\n");
-                            w.write("                    @Override public void accept(" + evtType + " e) {\n");
-                            if (priv) {
-                                w.write("                        " + ownerPkg + "." + accessor + "." + name + "Accessor(l, e);\n");
-                            } else {
-                                w.write("                        l." + name + "(e);\n");
-                            }
-                        } else {
-                            int extras = m.getParameters().size() - 1;
-                            w.write("            {\n");
-                            w.write("                EventConsumer<" + evtType + "> c = new EventConsumer<>() {\n");
-                            w.write("                    final EventWrapper<" + evtType + "> w = bus.getWrapper(" + evtType + ".class);\n");
-                            w.write("                    @Override public void accept(" + evtType + " e) {\n");
-                            w.write("                        Object[] x = w.wrap(e);\n");
-                            w.write("                        if (x.length != " + extras + ") { return; }\n");
-                            for (int i = 1; i < m.getParameters().size(); i++) {
-                                String pt = raw(m.getParameters().get(i).asType().toString());
-                                w.write("                        if (!(x[" + (i - 1) + "] instanceof " + pt + ")) { return; }\n");
-                            }
-
-                            w.write("                        l." + name + "(e");
-                            for (int i = 1; i < m.getParameters().size(); i++) {
-                                String pt = raw(m.getParameters().get(i).asType().toString());
-                                w.write(", (" + pt + ") x[" + (i - 1) + "]");
-                            }
-
-                            w.write(");\n");
+            w.write("        java.util.List<bot.staro.rokit.EventConsumer<?>> tmp =\n");
+            w.write("                new java.util.ArrayList<>(" + totalMethods + ");\n");
+            firstBranch = true;
+            byClass.entrySet().stream()
+                    .sorted((a, b) -> a.getKey().equals(b.getKey())
+                            ? 0
+                            : elements.getTypeElement(b.getKey())
+                            .getSuperclass().toString()
+                            .equals(a.getKey()) ? -1 : 1)
+                    .forEach(entry -> {
+                        try {
+                            emitBranch(w, entry, builtin);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
                         }
-
-                        w.write("                    }\n");
-                        w.write("                    @Override public int getPriority() { return " + prio + "; }\n");
-                        w.write("                    @Override public Class<" + evtType + "> getEventType() { return " + evtType + ".class; }\n");
-                        w.write("                };\n");
-                        w.write("                arr[__idx++] = c;\n");
-                        w.write("                bus.internalRegister(" + evtType + ".class, c);\n");
-                        w.write("            }\n");
-                    } else {
-                        String h = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
-                        w.write("            {\n");
-                        w.write("                Method mtd = getMethod(l, \"" + name + "\", " + m.getParameters().size() + ");\n");
-                        w.write("                var c = new " + h + "().createConsumer(bus, l, mtd, " + prio + ", " + evtType + ".class);\n");
-                        w.write("                arr[__idx++] = c;\n");
-                        w.write("            }\n");
-                    }
-                }
-
-                w.write("            SUBSCRIBERS.put(l, arr);\n");
-                w.write("        }\n");
-            }
-
+                    });
+            w.write("        bot.staro.rokit.EventConsumer<?>[] arr =\n");
+            w.write("                tmp.toArray(new bot.staro.rokit.EventConsumer<?>[0]);\n");
+            w.write("        if (arr.length != 0) SUBSCRIBERS.put(sub, arr);\n");
             w.write("    }\n\n");
 
             w.write("    @Override\n");
@@ -227,7 +177,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
             int id = 0;
             for (String t : types) {
                 String cls = t.substring(0, t.length() - 6);
-                w.write("        if (c == " + cls + ".class) { return " + id + "; }\n");
+                w.write(" " + (id == 0 ? "if" : "else if") + " (c == " + cls + ".class) return " + id + ";\n");
                 id++;
             }
 
@@ -239,6 +189,86 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
             w.write("}\n");
         }
+    }
+
+    private void emitBranch(Writer w, Map.Entry<String, List<MethodInfo>> entry, TypeElement builtin) throws IOException {
+        String owner = entry.getKey();
+        String simple = owner.substring(owner.lastIndexOf('.') + 1);
+        String accessor = simple + "EventAccessor";
+        String ownerPkg = processingEnv.getElementUtils()
+                .getPackageOf(processingEnv.getElementUtils().getTypeElement(owner))
+                .getQualifiedName()
+                .toString();
+        w.write("        " + (firstBranch ? "if" : "else if") + " (sub instanceof " + owner + " l) {\n");
+        firstBranch = false;
+        for (MethodInfo mi : entry.getValue()) {
+            ExecutableElement m = mi.method();
+            String evtType = raw(m.getParameters().getFirst().asType().toString());
+            String name = m.getSimpleName().toString();
+            int prio = extractPriority(m, mi.annotation());
+            boolean priv = m.getModifiers().contains(Modifier.PRIVATE);
+            if (mi.annotation().equals(builtin)) {
+                if (m.getParameters().size() == 1) {
+                    w.write("""
+                            {
+                                EventConsumer<%1$s> c = new EventConsumer<>() {
+                                    @Override public void accept(%1$s e) {
+                        """.formatted(evtType));
+                    if (priv) {
+                        w.write("                                        %s.%s.%sAccessor(l, e);\n".formatted(ownerPkg, accessor, name));
+                    } else {
+                        w.write("                                        l.%s(e);\n".formatted(name));
+                    }
+                } else {
+                    int extras = m.getParameters().size() - 1;
+                    w.write("""
+                            {
+                                EventConsumer<%1$s> c = new EventConsumer<>() {
+                                    final EventWrapper<%1$s> w0 = bus.getWrapper(%1$s.class);
+                                    @Override public void accept(%1$s e) {
+                                        Object[] x = w0.wrap(e);
+                                        if (x.length != %2$d) return;
+                        """.formatted(evtType, extras));
+                    for (int i = 1; i < m.getParameters().size(); i++) {
+                        String pt = raw(m.getParameters().get(i).asType().toString());
+                        w.write("                                        if (!(x[%d] instanceof %s)) return;%n".formatted(i - 1, pt));
+                    }
+
+                    w.write("                                        l.%s(e".formatted(name));
+                    for (int i = 1; i < m.getParameters().size(); i++) {
+                        String pt = raw(m.getParameters().get(i).asType().toString());
+                        w.write(", (%s) x[%d]".formatted(pt, i - 1));
+                    }
+
+                    w.write(");\n");
+                }
+
+                w.write("""
+                                    }
+                                    @Override public int getPriority() { return %d; }
+                                    @Override public Class<%s> getEventType() { return %s.class; }
+                                };
+                                tmp.add(c);
+                                bus.internalRegister(%s.class, c);
+                            }
+                    """.formatted(prio, evtType, evtType, evtType));
+            } else {
+                String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
+                w.write("""
+                        {
+                            Method mtd = getMethod(l, "%s", %d);
+                            EventConsumer<?> c = new %s()
+                                .createConsumer(bus, l, mtd, %d, %s.class);
+                            tmp.add(c);
+                            bus.internalRegister(%s.class, c);
+                        }
+                    """.formatted(name, m.getParameters().size(),
+                        handlerSimple, prio, evtType,
+                        evtType));
+            }
+        }
+
+        w.write("        }\n");
     }
 
     private String extractHandler(TypeElement anno) {
