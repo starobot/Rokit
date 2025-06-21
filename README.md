@@ -8,6 +8,7 @@
 > Beta – the API is mostly stable, but minor breaking changes are still possible.
 
 ---
+TODO: private access methods invocation!!!
 
 ## ✨ Features
 * **No reflection in the hot path** – listener dispatch is just an array lookup.
