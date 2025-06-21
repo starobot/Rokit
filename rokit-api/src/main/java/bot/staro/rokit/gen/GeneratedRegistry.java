@@ -14,7 +14,7 @@ public interface GeneratedRegistry {
 
     void unregister(ListenerRegistry bus, Object subscriber);
 
-    int getEventId(Class<?> eventType);
+    int getEventId(Class<?> clazz);
 
     Class<?>[] eventTypes();
 

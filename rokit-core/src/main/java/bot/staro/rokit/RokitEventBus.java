@@ -10,10 +10,10 @@ public class RokitEventBus extends EventRegistry implements EventBus {
     public <E> void post(final E event) {
         final int id = REGISTRY.getEventId(event.getClass());
         if (id >= 0) {
-            final EventConsumer<E>[] arr = (EventConsumer<E>[]) listenerArrays[id];
-            int i = arr.length;
+            final EventConsumer<E>[] a = (EventConsumer<E>[]) listeners[id];
+            int i = a.length;
             while (i-- != 0) {
-                arr[i].accept(event);
+                a[i].accept(event);
             }
         }
     }

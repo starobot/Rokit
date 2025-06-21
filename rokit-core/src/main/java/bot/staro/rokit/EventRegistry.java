@@ -3,45 +3,56 @@ package bot.staro.rokit;
 import bot.staro.rokit.gen.GeneratedRegistry;
 
 import java.util.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-// We generate an array of listeners from the generated registry and index each listener with its own unique integer id.
-// Since the event consumer arrays are already pre-generated and pre-sorted, the overall subscription and dispatching becomes significantly faster.
+// Moonrise...
 public class EventRegistry implements ListenerRegistry {
-    protected static final GeneratedRegistry REGISTRY;
-    protected static final int N;
-    protected final List<EventConsumer<?>>[] listeners;
-    protected final EventConsumer<?>[][] listenerArrays;
-    protected final Map<Class<?>, EventWrapper<?>> wrappers;
+    protected static final GeneratedRegistry REGISTRY = ServiceLoader.load(GeneratedRegistry.class)
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("No Rokit listener registry found on class‑path"));
+    protected final Map<Class<?>, EventWrapper<?>> wrappers = new IdentityHashMap<>();
+    protected volatile EventConsumer<?>[][] listeners = new EventConsumer<?>[REGISTRY.eventTypes().length][0];
+    private final ReentrantReadWriteLock[] locks = Arrays.stream(REGISTRY.eventTypes())
+            .map(t -> new ReentrantReadWriteLock())
+            .toArray(ReentrantReadWriteLock[]::new);
 
-    @SuppressWarnings("unchecked")
-    protected EventRegistry() {
-        listeners = (List<EventConsumer<?>>[]) new List[N];
-        listenerArrays = new EventConsumer<?>[N][];
-        wrappers  = new IdentityHashMap<>();
-        for (int i = 0; i < N; i++) {
-            listeners[i] = new ArrayList<>();
-            listenerArrays[i] = new EventConsumer<?>[0];
+    @Override
+    public <T> void internalRegister(final Class<T> eventType, final EventConsumer<?> consumer) {
+        final int id = REGISTRY.getEventId(eventType);
+        if (id > -1) {
+            final ReentrantReadWriteLock.WriteLock w = locks[id].writeLock();
+            w.lock();
+            try {
+                final EventConsumer<?>[] oldArray = listeners[id];
+                final EventConsumer<?>[] newArray = Arrays.copyOf(oldArray, oldArray.length + 1);
+                newArray[oldArray.length] = consumer;
+                Arrays.sort(newArray, Comparator.comparingInt(EventConsumer::getPriority));
+                listeners[id] = newArray;
+            } finally {
+                w.unlock();
+            }
         }
     }
 
     @Override
-    public <T> void internalRegister(final Class<T> type, final EventConsumer<?> c) {
-        final int id = REGISTRY.getEventId(type);
-        if (id >= 0) {
-            final List<EventConsumer<?>> list = listeners[id];
-            list.add(c);
-            list.sort(Comparator.comparingInt(EventConsumer::getPriority));
-            listenerArrays[id] = list.toArray(new EventConsumer<?>[0]);
-        }
-    }
+    public <T> void internalUnregister(final Class<T> eventType, final EventConsumer<?> consumer) {
+        final int id = REGISTRY.getEventId(eventType);
+        if (id > -1) {
+            final ReentrantReadWriteLock.WriteLock w = locks[id].writeLock();
+            w.lock();
+            try {
+                final EventConsumer<?>[] oldArray = listeners[id];
+                int i = Arrays.asList(oldArray).indexOf(consumer);
+                if (i < 0) {
+                    return;
+                }
 
-    @Override
-    public <T> void internalUnregister(final Class<T> type, final EventConsumer<?> c) {
-        final int id = REGISTRY.getEventId(type);
-        if (id >= 0) {
-            final List<EventConsumer<?>> list = listeners[id];
-            if (list.remove(c)) {
-                listenerArrays[id] = list.toArray(new EventConsumer<?>[0]);
+                final EventConsumer<?>[] newArray = new EventConsumer<?>[oldArray.length - 1];
+                System.arraycopy(oldArray, 0, newArray, 0, i);
+                System.arraycopy(oldArray, i + 1, newArray, i, oldArray.length - i - 1);
+                listeners[id] = newArray;
+            } finally {
+                w.unlock();
             }
         }
     }
@@ -50,13 +61,6 @@ public class EventRegistry implements ListenerRegistry {
     @SuppressWarnings("unchecked")
     public <T> EventWrapper<T> getWrapper(final Class<T> eventType) {
         return (EventWrapper<T>) wrappers.get(eventType);
-    }
-
-    static {
-        REGISTRY = ServiceLoader.load(GeneratedRegistry.class)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No Rokit listener registry found on class‑path"));
-        N = REGISTRY.eventTypes().length;
     }
 
 }
