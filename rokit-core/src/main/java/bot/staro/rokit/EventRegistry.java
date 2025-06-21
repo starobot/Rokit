@@ -9,17 +9,17 @@ import java.util.*;
 public class EventRegistry implements ListenerRegistry {
     protected static final GeneratedRegistry REGISTRY;
     protected static final int N;
-    protected final List<EventConsumer<?>>[] listenerLists;
+    protected final List<EventConsumer<?>>[] listeners;
     protected final EventConsumer<?>[][] listenerArrays;
     protected final Map<Class<?>, EventWrapper<?>> wrappers;
 
     @SuppressWarnings("unchecked")
     protected EventRegistry() {
-        listenerLists = (List<EventConsumer<?>>[]) new List[N];
+        listeners = (List<EventConsumer<?>>[]) new List[N];
         listenerArrays = new EventConsumer<?>[N][];
         wrappers  = new IdentityHashMap<>();
         for (int i = 0; i < N; i++) {
-            listenerLists[i] = new ArrayList<>();
+            listeners[i] = new ArrayList<>();
             listenerArrays[i] = new EventConsumer<?>[0];
         }
     }
@@ -28,7 +28,7 @@ public class EventRegistry implements ListenerRegistry {
     public <T> void internalRegister(final Class<T> type, final EventConsumer<?> c) {
         final int id = REGISTRY.getEventId(type);
         if (id >= 0) {
-            final List<EventConsumer<?>> list = listenerLists[id];
+            final List<EventConsumer<?>> list = listeners[id];
             list.add(c);
             list.sort(Comparator.comparingInt(EventConsumer::getPriority));
             listenerArrays[id] = list.toArray(new EventConsumer<?>[0]);
@@ -39,7 +39,7 @@ public class EventRegistry implements ListenerRegistry {
     public <T> void internalUnregister(final Class<T> type, final EventConsumer<?> c) {
         final int id = REGISTRY.getEventId(type);
         if (id >= 0) {
-            final List<EventConsumer<?>> list = listenerLists[id];
+            final List<EventConsumer<?>> list = listeners[id];
             if (list.remove(c)) {
                 listenerArrays[id] = list.toArray(new EventConsumer<?>[0]);
             }

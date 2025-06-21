@@ -20,12 +20,16 @@ public class RokitEventBus extends EventRegistry implements EventBus {
 
     @Override
     public void subscribe(final Object subscriber) {
-        REGISTRY.register(this, subscriber);
+        if (!isSubscribed(subscriber)) {
+            REGISTRY.register(this, subscriber);
+        }
     }
 
     @Override
     public void unsubscribe(final Object subscriber) {
-        REGISTRY.unregister(this, subscriber);
+        if (isSubscribed(subscriber)) {
+            REGISTRY.unregister(this, subscriber);
+        }
     }
 
     @Override
