@@ -186,7 +186,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
             if (mi.annotation().equals(builtin)) {
                 if (m.getParameters().size() == 1) {
                     w.write("""
-da            {
+            {
                 final EventConsumer<%1$s> c = new EventConsumer<>() {
                     @Override public void accept(%1$s e) { l.%2$s(e); }
                     @Override public int getPriority() { return %3$d; }
