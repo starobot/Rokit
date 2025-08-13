@@ -1,28 +1,60 @@
 package bot.staro.rokit.impl;
 
-import bot.staro.rokit.AnnotationHandler;
-import bot.staro.rokit.EventConsumer;
-import bot.staro.rokit.ListenerRegistry;
+import bot.staro.rokit.*;
 
-import java.lang.reflect.Method;
+public final class DefaultListenerHandler implements AnnotationHandler {
+    public static final Object[] EMPTY = new Object[0];
 
-/**
- * Fallback handler for any listener annotation that isn't inlined.
- * Supports multi-arg wrapped listeners by using the bus's EventWrapper.
- */
-public class DefaultListenerHandler implements AnnotationHandler {
     @Override
-    public <E> EventConsumer<E> createConsumer(final ListenerRegistry bus, final Object listenerInstance,
-                                               final Method method, final int priority, final Class<E> eventType) {
-        EventConsumer<E> consumer = new DefaultEventConsumer<>(bus, listenerInstance, method, priority, eventType);
-        bus.internalRegister(eventType, consumer);
-        return consumer;
-    }
+    public <E> EventConsumer<E> createConsumer(final ListenerRegistry bus, final Object listenerInstance, final Invoker<E> invoker,
+                                               final int priority, final Class<E> eventType, final int wrappedCount, final ArgProvider<? super E>[] providers) {
+        return new EventConsumer<>() {
+            final EventWrapper<E> w0 = wrappedCount == 0 ? null : bus.getWrapper(eventType);
+            final Object[] wrappedBuf = wrappedCount == 0 ? null : new Object[wrappedCount];
+            final Object[] providedBuf = providers.length == 0 ? null : new Object[providers.length];
 
-    private static final class DefaultEventConsumer<E> extends BaseEventConsumer<E> {
-        private DefaultEventConsumer(ListenerRegistry b, Object l, Method m, int p, Class<E> t) {
-            super(b, l, m, p, t);
-        }
+            @Override
+            public void accept(final E e) {
+                if (wrappedCount == 0) {
+                    if (providedBuf != null) {
+                        for (int i = 0; i < providers.length; i++) {
+                            providedBuf[i] = providers[i].get(bus, listenerInstance, e);
+                        }
+
+                        invoker.call(listenerInstance, e, EMPTY, providedBuf);
+                    } else {
+                        invoker.call(listenerInstance, e, EMPTY, EMPTY);
+                    }
+
+                    return;
+                }
+
+                if (w0 == null) {
+                    return;
+                }
+
+                w0.wrapInto(e, wrappedBuf);
+                if (providedBuf != null) {
+                    for (int i = 0; i < providers.length; i++) {
+                        providedBuf[i] = providers[i].get(bus, listenerInstance, e);
+                    }
+
+                    invoker.call(listenerInstance, e, wrappedBuf, providedBuf);
+                } else {
+                    invoker.call(listenerInstance, e, wrappedBuf, EMPTY);
+                }
+            }
+
+            @Override
+            public int getPriority() {
+                return priority;
+            }
+
+            @Override
+            public Class<E> getEventType() {
+                return eventType;
+            }
+        };
     }
 
 }
