@@ -173,120 +173,110 @@ public final class EventListenerProcessor extends AbstractProcessor {
         firstBranch = false;
         for (final MethodInfo mi : entry.getValue()) {
             final ExecutableElement m = mi.method();
+            if (!m.getModifiers().contains(Modifier.PUBLIC)) {
+                continue;
+            }
+            
             final String evtType = raw(m.getParameters().getFirst().asType().toString());
             final String name = m.getSimpleName().toString();
             final int prio = extractPriority(m, mi.annotation());
-            final boolean priv = m.getModifiers().contains(Modifier.PRIVATE);
-            final String decl = ((TypeElement) m.getEnclosingElement()).getQualifiedName().toString();
             if (mi.annotation().equals(builtin)) {
                 if (m.getParameters().size() == 1) {
-                    if (!priv) {
-                        w.write("""
-                            {
-                                final EventConsumer<%1$s> c = new EventConsumer<>() {
-                                    @Override public void accept(%1$s e) { l.%2$s(e); }
-                                    @Override public int getPriority() { return %3$d; }
-                                    @Override public Class<%1$s> getEventType() { return %1$s.class; }
-                                };
-                                tmp.add(c);
-                            }
-                            """.formatted(evtType, name, prio));
-                    } else {
-                        w.write("""
-                            {
-                                final Method mtd;
-                                try {
-                                    mtd = %3$s.class.getDeclaredMethod("%2$s", %1$s.class);
-                                    mtd.setAccessible(true);
-                                } catch (Throwable ex) { throw new RuntimeException(ex); }
-                                final EventConsumer<%1$s> c = new EventConsumer<>() {
-                                    @Override public void accept(%1$s e) {
-                                        try { mtd.invoke(l, e); } catch (Throwable t) { throw new RuntimeException(t); }
-                                    }
-                                    @Override public int getPriority() { return %4$d; }
-                                    @Override public Class<%1$s> getEventType() { return %1$s.class; }
-                                };
-                                tmp.add(c);
-                            }
-                            """.formatted(evtType, name, decl, prio));
-                    }
+                    w.write("""
+                {
+                    final EventConsumer<%1$s> c = new EventConsumer<>() {
+                        @Override public void accept(%1$s e) { l.%2$s(e); }
+                        @Override public int getPriority() { return %3$d; }
+                        @Override public Class<%1$s> getEventType() { return %1$s.class; }
+                    };
+                    tmp.add(c);
+                }
+                """.formatted(evtType, name, prio));
                 } else {
                     final int extras = m.getParameters().size() - 1;
-                    if (!priv) {
-                        w.write("""
-                            {
-                                final EventConsumer<%1$s> c = new EventConsumer<>() {
-                                    final EventWrapper<%1$s> w0 = bus.getWrapper(%1$s.class);
-                                    @Override public void accept(%1$s e) {
-                                        final Object[] x = w0.wrap(e);
-                                        if (x.length != %2$d) return;
-                            """.formatted(evtType, extras));
-                        for (int i = 1; i < m.getParameters().size(); i++) {
-                            final String pt = raw(m.getParameters().get(i).asType().toString());
-                            w.write("                                        if (!(x[%d] instanceof %s)) return;%n".formatted(i - 1, pt));
+                    final StringBuilder args = new StringBuilder();
+                    for (int i = 1; i < m.getParameters().size(); i++) {
+                        final String pt = raw(m.getParameters().get(i).asType().toString());
+                        if (!args.isEmpty()) {
+                            args.append(", ");
                         }
 
-                        w.write("                                        l.%s(e".formatted(name));
-                        for (int i = 1; i < m.getParameters().size(); i++) {
-                            final String pt = raw(m.getParameters().get(i).asType().toString());
-                            w.write(", (%s) x[%d]".formatted(pt, i - 1));
-                        }
-
-                        w.write(");\n");
-                        w.write("""
-                                    }
-                                    @Override public int getPriority() { return %1$d; }
-                                    @Override public Class<%2$s> getEventType() { return %2$s.class; }
-                                };
-                                tmp.add(c);
-                            }
-                            """.formatted(prio, evtType));
-                    } else {
-                        w.write("""
-                            {
-                                final Method mtd;
-                                try {
-                                    mtd = %4$s.class.getDeclaredMethod("%2$s", %3$s);
-                                    mtd.setAccessible(true);
-                                } catch (Throwable ex) { throw new RuntimeException(ex); }
-                                final EventConsumer<%1$s> c = new EventConsumer<>() {
-                                    final EventWrapper<%1$s> w0 = bus.getWrapper(%1$s.class);
-                                    @Override public void accept(%1$s e) {
-                                        final Object[] x = w0.wrap(e);
-                                        if (x.length != %5$d) return;
-                                        final Object[] args = new Object[%6$d];
-                                        args[0] = e;
-                            """.formatted(
-                                evtType, name, paramClassList(m), decl, extras, m.getParameters().size()
-                        ));
-                        for (int i = 1; i < m.getParameters().size(); i++) {
-                            w.write("                                        args[%d] = x[%d];%n".formatted(i, i - 1));
-                        }
-
-                        w.write("""
-                                        try { mtd.invoke(l, args); } catch (Throwable t) { throw new RuntimeException(t); }
-                                    }
-                                    @Override public int getPriority() { return %1$d; }
-                                    @Override public Class<%2$s> getEventType() { return %2$s.class; }
-                                };
-                                tmp.add(c);
-                            }
-                            """.formatted(prio, evtType));
+                        args.append("(").append(pt).append(") w[").append(i - 1).append("]");
                     }
+
+                    w.write("""
+                {
+                    final EventConsumer<%1$s> c = new EventConsumer<>() {
+                        final EventWrapper<%1$s> w0 = bus.getWrapper(%1$s.class);
+                        final Object[] w = new Object[%2$d];
+                        @Override public void accept(%1$s e) {
+                            if (w0 == null) return;
+                            w0.wrapInto(e, w);
+                            l.%3$s(e%4$s);
+                        }
+                        @Override public int getPriority() { return %5$d; }
+                        @Override public Class<%1$s> getEventType() { return %1$s.class; }
+                    };
+                    tmp.add(c);
+                }
+                """.formatted(evtType, extras, name, args.isEmpty() ? "" : ", " + args, prio));
                 }
             } else {
-                final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
-                w.write("""
-                    {
-                        final Method mtd;
-                        try {
-                            mtd = %4$s.class.getDeclaredMethod("%1$s", %2$s);
-                            mtd.setAccessible(true);
-                        } catch (Throwable ex) { throw new RuntimeException(ex); }
-                        final EventConsumer<?> c = new %3$s().createConsumer(bus, l, mtd, %5$d, %6$s.class);
-                        tmp.add(c);
+                AnnotationMirror annoOnMethod = null;
+                for (final AnnotationMirror am : m.getAnnotationMirrors()) {
+                    if (am.getAnnotationType().asElement().equals(mi.annotation())) {
+                        annoOnMethod = am;
+                        break;
                     }
-                    """.formatted(name, paramClassList(m), handlerSimple, decl, prio, evtType));
+                }
+
+                final Integer wrappedAttr = annoOnMethod == null ? null : extractIntAttr(annoOnMethod, "wrapped");
+                final List<String> providersAttr = annoOnMethod == null ? List.of() : extractClassArrayAttr(annoOnMethod, "providers");
+                final int paramCount = m.getParameters().size();
+                final int wrapped = wrappedAttr == null ? 0 : wrappedAttr;
+                final int nonWrapped = Math.max(0, paramCount - 1 - wrapped);
+                if (providersAttr.size() != nonWrapped) {
+                    continue;
+                }
+
+                w.write("{\n");
+                if (providersAttr.isEmpty()) {
+                    w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[0];\n");
+                } else {
+                    w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[] {\n");
+                    for (int i = 0; i < providersAttr.size(); i++) {
+                        final String prov = providersAttr.get(i);
+                        w.write("        new " + prov + "()" + (i == providersAttr.size() - 1 ? "\n" : ",\n"));
+                    }
+
+                    w.write("    };\n");
+                }
+
+                w.write("""
+            final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
+                @Override
+                public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
+                    final %2$s l0 = (%2$s) listener;
+            """.formatted(evtType, owner));
+                w.write("                    l0." + name + "(e");
+                for (int i = 0; i < wrapped; i++) {
+                    final String pt = raw(m.getParameters().get(1 + i).asType().toString());
+                    w.write(", (" + pt + ") wrapped[" + i + "]");
+                }
+
+                for (int i = 0; i < nonWrapped; i++) {
+                    final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
+                    w.write(", (" + pt + ") provided[" + i + "]");
+                }
+
+                w.write(");\n");
+                w.write("""
+                }
+            };
+            final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %2$s().createConsumer(bus, l, inv, %3$d, %1$s.class, %4$d, prov);
+            tmp.add(c);
+        }
+        """.formatted(evtType, extractHandler(mi.annotation()).replaceFirst(".+\\.", ""), prio, wrapped));
             }
         }
 
@@ -339,6 +329,49 @@ public final class EventListenerProcessor extends AbstractProcessor {
         final int idx = fqn.indexOf('<');
         return idx < 0 ? fqn : fqn.substring(0, idx);
     }
+
+    private static Integer extractIntAttr(final AnnotationMirror am, final String name) {
+        for (final var ev : am.getElementValues().entrySet()) {
+            if (name.contentEquals(ev.getKey().getSimpleName())) {
+                return Integer.parseInt(ev.getValue().getValue().toString());
+            }
+        }
+
+        return null;
+    }
+
+    private static List<String> extractClassArrayAttr(final AnnotationMirror am, final String name) {
+        final List<String> r = new ArrayList<>();
+        for (final var ev : am.getElementValues().entrySet()) {
+            if (name.contentEquals(ev.getKey().getSimpleName())) {
+                final String s = ev.getValue().getValue().toString();
+                if (s.startsWith("[") && s.endsWith("]")) {
+                    final String body = s.substring(1, s.length() - 1).trim();
+                    if (!body.isEmpty()) {
+                        for (final String e : body.split(",")) {
+                            r.add(e.trim());
+                        }
+                    }
+                } else if (!s.isEmpty()) {
+                    r.add(s);
+                }
+            }
+        }
+
+        return r;
+    }
+
+    private AnnotationMirror findListenerAnnotationMirror(final TypeElement annotationType) {
+        final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
+        for (final AnnotationMirror am : annotationType.getAnnotationMirrors()) {
+            if (am.getAnnotationType().asElement().equals(marker)) {
+                return am;
+            }
+        }
+
+        return null;
+    }
+
 
     private record MethodInfo(TypeElement annotation, ExecutableElement method) {}
 

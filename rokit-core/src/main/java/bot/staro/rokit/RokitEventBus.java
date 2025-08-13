@@ -26,7 +26,8 @@ public class RokitEventBus extends EventRegistry implements EventBus {
                 a[0].accept(event);
                 return;
             case 2:
-                a[1].accept(event); a[0].accept(event);
+                a[1].accept(event);
+                a[0].accept(event);
                 return;
             default:
                 for (int i = a.length; --i >= 0; ) {
