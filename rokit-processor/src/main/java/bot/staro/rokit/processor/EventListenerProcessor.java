@@ -22,6 +22,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
     private static final String DEF_PKG = "bot.staro.rokit.generated";
     private static final String GEN_NAME = "EventListenerRegistry";
     private static final String SERVICE_PATH = "META-INF/services/bot.staro.rokit.gen.GeneratedRegistry";
+
     private Elements elements;
     private boolean firstBranch;
 
@@ -35,9 +36,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
     public boolean process(final Set<? extends TypeElement> annotations, final RoundEnvironment env) {
         final Set<TypeElement> listenerAnnos = new LinkedHashSet<>();
         final TypeElement builtin = elements.getTypeElement("bot.staro.rokit.Listener");
-        if (builtin != null) {
-            listenerAnnos.add(builtin);
-        }
+        if (builtin != null) listenerAnnos.add(builtin);
 
         final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
         if (marker != null) {
@@ -52,22 +51,19 @@ public final class EventListenerProcessor extends AbstractProcessor {
         for (final TypeElement anno : listenerAnnos) {
             for (final Element e : env.getElementsAnnotatedWith(anno)) {
                 if (e instanceof ExecutableElement m) {
-                    String owner = ((TypeElement) m.getEnclosingElement()).getQualifiedName().toString();
-                    byClass.computeIfAbsent(owner, k -> new java.util.ArrayList<>()).add(new MethodInfo(anno, m));
+                    final String owner = ((TypeElement) m.getEnclosingElement()).getQualifiedName().toString();
+                    byClass.computeIfAbsent(owner, k -> new ArrayList<>()).add(new MethodInfo(anno, m));
                 }
             }
         }
 
-        if (byClass.isEmpty()) {
-            return false;
-        }
+        if (byClass.isEmpty()) return false;
 
         try {
             writeFiles(builtin, listenerAnnos, byClass);
         } catch (IOException ex) {
             processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, "Rokit processor error: " + ex);
         }
-
         return true;
     }
 
@@ -103,7 +99,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
             w.write("import bot.staro.rokit.gen.GeneratedRegistry;\n");
             w.write("import java.util.*;\n");
             w.write("import java.util.concurrent.ConcurrentHashMap;\n");
-            w.write("import java.lang.reflect.Method;\n");
             for (final String h : handlers) {
                 w.write("import " + h + ";\n");
             }
@@ -147,7 +142,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
             for (final String t : types) {
                 w.write("        " + t + ",\n");
             }
-
             w.write("    };\n\n");
 
             w.write("    @Override\n");
@@ -157,7 +151,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 final String cls = t.substring(0, t.length() - 6);
                 w.write("        " + (id == 0 ? "if" : "else if") + " (c == " + cls + ".class) return " + (id++) + ";\n");
             }
-
             w.write("        return -1;\n");
             w.write("    }\n\n");
 
@@ -171,11 +164,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
         final String owner = entry.getKey();
         w.write("        " + (firstBranch ? "if" : "else if") + " (sub instanceof " + owner + " l) {\n");
         firstBranch = false;
+
         for (final MethodInfo mi : entry.getValue()) {
             final ExecutableElement m = mi.method();
-            if (!m.getModifiers().contains(Modifier.PUBLIC)) {
-                continue;
-            }
+            if (!m.getModifiers().contains(Modifier.PUBLIC)) continue;
 
             final String evtType = raw(m.getParameters().getFirst().asType().toString());
             final String name = m.getSimpleName().toString();
@@ -218,60 +210,93 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
                 """.formatted(evtType, extras, name, args.isEmpty() ? "" : ", " + args, prio));
                 }
-            } else {
-                final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
+                continue;
+            }
+            
+            AnnotationMirror annoOnMethod = null;
+            for (final AnnotationMirror am : m.getAnnotationMirrors()) {
+                if (am.getAnnotationType().asElement().equals(mi.annotation())) {
+                    annoOnMethod = am; break;
+                }
+            }
 
-                AnnotationMirror annoOnMethod = null;
-                for (final AnnotationMirror am : m.getAnnotationMirrors()) {
-                    if (am.getAnnotationType().asElement().equals(mi.annotation())) {
-                        annoOnMethod = am;
+            final Integer wrappedAttr = (annoOnMethod == null) ? null : extractIntAttr(annoOnMethod, "wrapped");
+            final List<String> customProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "providers");
+            final List<String> injectTypes = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectTypes");
+            final List<String> injectProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectProviders");
+
+            if (injectTypes.size() != injectProviders.size()) {
+                processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+                        "injectTypes.length must equal injectProviders.length", m);
+                continue;
+            }
+
+            final Map<String,String> injectMap = new HashMap<>();
+            for (int i = 0; i < injectTypes.size(); i++) {
+                injectMap.put(raw(injectTypes.get(i)), injectProviders.get(i));
+            }
+
+            final int paramCount = m.getParameters().size();
+            final int wrapped = (wrappedAttr == null) ? 0 : wrappedAttr;
+            final int nonWrapped = Math.max(0, paramCount - 1 - wrapped);
+
+            final List<String> provExpr = new ArrayList<>(nonWrapped);
+            int customIdx = 0;
+
+            for (int i = 1 + wrapped; i < paramCount; i++) {
+                final String pt = raw(m.getParameters().get(i).asType().toString());
+                final String mappedProvider = injectMap.get(pt);
+                if (mappedProvider != null) {
+                    provExpr.add("new " + mappedProvider + "()");
+                } else {
+                    if (customIdx >= customProviders.size()) {
+                        processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+                                "Missing ArgProvider for custom parameter type: " + pt, m);
+                        provExpr.clear();
                         break;
                     }
+                    provExpr.add("new " + customProviders.get(customIdx++) + "()");
                 }
+            }
+            if (provExpr.isEmpty() && nonWrapped > 0) {
+                continue;
+            }
+            if (customIdx < customProviders.size()) {
+                processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+                        "Too many providers specified; " + customProviders.size()
+                                + " provided but only " + customIdx + " used.", m);
+                continue;
+            }
 
-                final Integer wrappedAttr = annoOnMethod == null ? null : extractIntAttr(annoOnMethod, "wrapped");
-                final java.util.List<String> providersAttr = annoOnMethod == null ? java.util.List.of() : extractClassArrayAttr(annoOnMethod, "providers");
-                final int paramCount = m.getParameters().size();
-                final int wrapped = wrappedAttr == null ? 0 : wrappedAttr;
-                final int nonWrapped = Math.max(0, paramCount - 1 - wrapped);
-
-                if (providersAttr.size() != nonWrapped) {
-                    processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
-                            "@" + mi.annotation().getSimpleName()
-                                    + ": providers count (" + providersAttr.size()
-                                    + ") must equal non-wrapped params (" + nonWrapped + ")", m);
-                    continue;
+            w.write("{\n");
+            if (nonWrapped == 0) {
+                w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[0];\n");
+            } else {
+                w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[] {\n");
+                for (int i = 0; i < provExpr.size(); i++) {
+                    w.write("        " + provExpr.get(i) + (i + 1 == provExpr.size() ? "\n" : ",\n"));
                 }
+                w.write("    };\n");
+            }
 
-                w.write("{\n");
-                if (providersAttr.isEmpty()) {
-                    w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[0];\n");
-                } else {
-                    w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[] {\n");
-                    for (int i = 0; i < providersAttr.size(); i++) {
-                        final String provCls = providersAttr.get(i);
-                        w.write("        new " + provCls + "()" + (i == providersAttr.size() - 1 ? "\n" : ",\n"));
-                    }
-                    w.write("    };\n");
-                }
-
-                w.write("""
+            final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
+            w.write("""
                 final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
                     @Override
                     public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
                         final %2$s l0 = (%2$s) listener;
             """.formatted(evtType, owner));
-                w.write("                        l0." + name + "(e");
-                for (int i = 0; i < wrapped; i++) {
-                    final String pt = raw(m.getParameters().get(1 + i).asType().toString());
-                    w.write(", (" + pt + ") wrapped[" + i + "]");
-                }
-                for (int i = 0; i < nonWrapped; i++) {
-                    final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
-                    w.write(", (" + pt + ") provided[" + i + "]");
-                }
-                w.write(");\n");
-                w.write("""
+            w.write("                        l0." + name + "(e");
+            for (int i = 0; i < wrapped; i++) {
+                final String pt = raw(m.getParameters().get(1 + i).asType().toString());
+                w.write(", (" + pt + ") wrapped[" + i + "]");
+            }
+            for (int i = 0; i < nonWrapped; i++) {
+                final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
+                w.write(", (" + pt + ") provided[" + i + "]");
+            }
+            w.write(");\n");
+            w.write("""
                     }
                 };
                 @SuppressWarnings("unchecked")
@@ -279,37 +304,16 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 tmp.add(c);
             }
             """.formatted(evtType, handlerSimple, prio, wrapped));
-            }
         }
-        w.write("        }\n");
-    }
 
-    private String buildNonBuiltinFallbackBlock(final ExecutableElement m, final String owner, final String evtType) {
-        final int paramCount = m.getParameters().size();
-        final int wrapped = 0;
-        final int nonWrapped = Math.max(0, paramCount - 1);
-        return "{\n" +
-                "    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[0];\n" +
-                """
-                        final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
-                            @Override
-                            public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
-                                final %2$s l0 = (%2$s) listener;
-                        """.formatted(evtType, owner) +
-                "                        l0." + m.getSimpleName() + "(e);\n" +
-                "                    }\n" +
-                "                };\n" +
-                "                @SuppressWarnings(\"unchecked\")\n" +
-                "                final EventConsumer<" + evtType + "> c = (EventConsumer<" + evtType + ">) new " + extractHandler((TypeElement) m.getAnnotationMirrors().getFirst().getAnnotationType().asElement()).replaceFirst(".+\\.", "") + "().createConsumer(bus, l, inv, 0, " + evtType + ".class, " + wrapped + ", prov);\n" +
-                "                tmp.add(c);\n" +
-                "            }\n";
+        w.write("        }\n");
     }
 
     private String extractHandler(final TypeElement annotation) {
         final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
         for (final AnnotationMirror am : annotation.getAnnotationMirrors()) {
             if (am.getAnnotationType().asElement().equals(marker)) {
-                for (final var ev : am.getElementValues().entrySet()) {
+                for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
                     if ("handler".contentEquals(ev.getKey().getSimpleName())) {
                         return ev.getValue().getValue().toString();
                     }
@@ -334,24 +338,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return 0;
     }
 
-    private static String paramClassList(final ExecutableElement element) {
-        final StringBuilder builder = new StringBuilder();
-        for (final VariableElement p : element.getParameters()) {
-            if (!builder.isEmpty()) {
-                builder.append(", ");
-            }
-
-            builder.append(raw(p.asType().toString())).append(".class");
-        }
-
-        return builder.toString();
-    }
-
-    private static String raw(final String fqn) {
-        final int idx = fqn.indexOf('<');
-        return idx < 0 ? fqn : fqn.substring(0, idx);
-    }
-
     private Integer extractIntAttr(final AnnotationMirror am, final String name) {
         for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
             if (name.contentEquals(ev.getKey().getSimpleName())) {
@@ -370,12 +356,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 if (s.startsWith("[") && s.endsWith("]")) {
                     final String body = s.substring(1, s.length() - 1).trim();
                     if (!body.isEmpty()) {
-                        for (final String e : body.split(",")) {
-                            r.add(e.trim());
-                        }
+                        for (final String e : body.split(",")) r.add(raw(e.trim()));
                     }
                 } else if (!s.isEmpty()) {
-                    r.add(s);
+                    r.add(raw(s));
                 }
             }
         }
@@ -383,17 +367,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return r;
     }
 
-    private AnnotationMirror findListenerAnnotationMirror(final TypeElement annotationType) {
-        final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
-        for (final AnnotationMirror am : annotationType.getAnnotationMirrors()) {
-            if (am.getAnnotationType().asElement().equals(marker)) {
-                return am;
-            }
-        }
-
-        return null;
+    private static String raw(final String fqn) {
+        final int idx = fqn.indexOf('<');
+        return idx < 0 ? fqn : fqn.substring(0, idx);
     }
-
 
     private record MethodInfo(TypeElement annotation, ExecutableElement method) {}
 
