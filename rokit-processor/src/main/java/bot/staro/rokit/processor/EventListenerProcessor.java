@@ -176,7 +176,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
             if (!m.getModifiers().contains(Modifier.PUBLIC)) {
                 continue;
             }
-            
+
             final String evtType = raw(m.getParameters().getFirst().asType().toString());
             final String name = m.getSimpleName().toString();
             final int prio = extractPriority(m, mi.annotation());
@@ -200,10 +200,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         if (!args.isEmpty()) {
                             args.append(", ");
                         }
-
                         args.append("(").append(pt).append(") w[").append(i - 1).append("]");
                     }
-
                     w.write("""
                 {
                     final EventConsumer<%1$s> c = new EventConsumer<>() {
@@ -222,6 +220,21 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 """.formatted(evtType, extras, name, args.isEmpty() ? "" : ", " + args, prio));
                 }
             } else {
+                final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
+                w.write("""
+            {
+                final Object h = new %1$s();
+                if (h instanceof bot.staro.rokit.MethodAnnotationHandler mh) {
+                    final java.lang.reflect.Method mtd;
+                    try {
+                        mtd = %2$s.class.getMethod("%3$s", %4$s);
+                    } catch (Throwable ex) { throw new RuntimeException(ex); }
+                    @SuppressWarnings("unchecked")
+                    final EventConsumer<%5$s> c = (EventConsumer<%5$s>) mh.createConsumer(bus, l, mtd, %6$d, %5$s.class);
+                    tmp.add(c);
+                } else {
+            """.formatted(handlerSimple, owner, name, paramClassList(m), evtType, prio));
+
                 AnnotationMirror annoOnMethod = null;
                 for (final AnnotationMirror am : m.getAnnotationMirrors()) {
                     if (am.getAnnotationType().asElement().equals(mi.annotation())) {
@@ -235,7 +248,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 final int paramCount = m.getParameters().size();
                 final int wrapped = wrappedAttr == null ? 0 : wrappedAttr;
                 final int nonWrapped = Math.max(0, paramCount - 1 - wrapped);
+
                 if (providersAttr.size() != nonWrapped) {
+                    w.write("                    }\n");
+                    w.write("                }\n");
                     continue;
                 }
 
@@ -245,20 +261,19 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 } else {
                     w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[] {\n");
                     for (int i = 0; i < providersAttr.size(); i++) {
-                        final String prov = providersAttr.get(i);
-                        w.write("        new " + prov + "()" + (i == providersAttr.size() - 1 ? "\n" : ",\n"));
+                        final String provCls = providersAttr.get(i);
+                        w.write("        new " + provCls + "()" + (i == providersAttr.size() - 1 ? "\n" : ",\n"));
                     }
-
                     w.write("    };\n");
                 }
 
                 w.write("""
-            final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
-                @Override
-                public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
-                    final %2$s l0 = (%2$s) listener;
+                final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
+                    @Override
+                    public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
+                        final %2$s l0 = (%2$s) listener;
             """.formatted(evtType, owner));
-                w.write("                    l0." + name + "(e");
+                w.write("                        l0." + name + "(e");
                 for (int i = 0; i < wrapped; i++) {
                     final String pt = raw(m.getParameters().get(1 + i).asType().toString());
                     w.write(", (" + pt + ") wrapped[" + i + "]");
@@ -271,16 +286,41 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
                 w.write(");\n");
                 w.write("""
-                }
-            };
-            final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %2$s().createConsumer(bus, l, inv, %3$d, %1$s.class, %4$d, prov);
-            tmp.add(c);
-        }
-        """.formatted(evtType, extractHandler(mi.annotation()).replaceFirst(".+\\.", ""), prio, wrapped));
+                    }
+                };
+                @SuppressWarnings("unchecked")
+                final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %2$s().createConsumer(bus, l, inv, %3$d, %1$s.class, %4$d, prov);
+                tmp.add(c);
+            }
+            """.formatted(evtType, handlerSimple, prio, wrapped));
+
+                w.write("                    }\n");
+                w.write("                }\n");
             }
         }
 
         w.write("        }\n");
+    }
+
+    private String buildNonBuiltinFallbackBlock(final ExecutableElement m, final String owner, final String evtType) {
+        final int paramCount = m.getParameters().size();
+        final int wrapped = 0;
+        final int nonWrapped = Math.max(0, paramCount - 1);
+        return "{\n" +
+                "    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[0];\n" +
+                """
+                        final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
+                            @Override
+                            public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
+                                final %2$s l0 = (%2$s) listener;
+                        """.formatted(evtType, owner) +
+                "                        l0." + m.getSimpleName() + "(e);\n" +
+                "                    }\n" +
+                "                };\n" +
+                "                @SuppressWarnings(\"unchecked\")\n" +
+                "                final EventConsumer<" + evtType + "> c = (EventConsumer<" + evtType + ">) new " + extractHandler((TypeElement) m.getAnnotationMirrors().getFirst().getAnnotationType().asElement()).replaceFirst(".+\\.", "") + "().createConsumer(bus, l, inv, 0, " + evtType + ".class, " + wrapped + ", prov);\n" +
+                "                tmp.add(c);\n" +
+                "            }\n";
     }
 
     private String extractHandler(final TypeElement annotation) {
