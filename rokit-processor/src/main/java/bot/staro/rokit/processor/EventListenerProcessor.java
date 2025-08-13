@@ -180,6 +180,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
             final String evtType = raw(m.getParameters().getFirst().asType().toString());
             final String name = m.getSimpleName().toString();
             final int prio = extractPriority(m, mi.annotation());
+
             if (mi.annotation().equals(builtin)) {
                 if (m.getParameters().size() == 1) {
                     w.write("""
@@ -197,9 +198,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
                     final StringBuilder args = new StringBuilder();
                     for (int i = 1; i < m.getParameters().size(); i++) {
                         final String pt = raw(m.getParameters().get(i).asType().toString());
-                        if (!args.isEmpty()) {
-                            args.append(", ");
-                        }
+                        if (!args.isEmpty()) args.append(", ");
                         args.append("(").append(pt).append(") w[").append(i - 1).append("]");
                     }
                     w.write("""
@@ -221,19 +220,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
             } else {
                 final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
-                w.write("""
-            {
-                final Object h = new %1$s();
-                if (h instanceof bot.staro.rokit.MethodAnnotationHandler mh) {
-                    final java.lang.reflect.Method mtd;
-                    try {
-                        mtd = %2$s.class.getMethod("%3$s", %4$s);
-                    } catch (Throwable ex) { throw new RuntimeException(ex); }
-                    @SuppressWarnings("unchecked")
-                    final EventConsumer<%5$s> c = (EventConsumer<%5$s>) mh.createConsumer(bus, l, mtd, %6$d, %5$s.class);
-                    tmp.add(c);
-                } else {
-            """.formatted(handlerSimple, owner, name, paramClassList(m), evtType, prio));
 
                 AnnotationMirror annoOnMethod = null;
                 for (final AnnotationMirror am : m.getAnnotationMirrors()) {
@@ -244,14 +230,16 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
 
                 final Integer wrappedAttr = annoOnMethod == null ? null : extractIntAttr(annoOnMethod, "wrapped");
-                final List<String> providersAttr = annoOnMethod == null ? List.of() : extractClassArrayAttr(annoOnMethod, "providers");
+                final java.util.List<String> providersAttr = annoOnMethod == null ? java.util.List.of() : extractClassArrayAttr(annoOnMethod, "providers");
                 final int paramCount = m.getParameters().size();
                 final int wrapped = wrappedAttr == null ? 0 : wrappedAttr;
                 final int nonWrapped = Math.max(0, paramCount - 1 - wrapped);
 
                 if (providersAttr.size() != nonWrapped) {
-                    w.write("                    }\n");
-                    w.write("                }\n");
+                    processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
+                            "@" + mi.annotation().getSimpleName()
+                                    + ": providers count (" + providersAttr.size()
+                                    + ") must equal non-wrapped params (" + nonWrapped + ")", m);
                     continue;
                 }
 
@@ -278,12 +266,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
                     final String pt = raw(m.getParameters().get(1 + i).asType().toString());
                     w.write(", (" + pt + ") wrapped[" + i + "]");
                 }
-
                 for (int i = 0; i < nonWrapped; i++) {
                     final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
                     w.write(", (" + pt + ") provided[" + i + "]");
                 }
-
                 w.write(");\n");
                 w.write("""
                     }
@@ -293,12 +279,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 tmp.add(c);
             }
             """.formatted(evtType, handlerSimple, prio, wrapped));
-
-                w.write("                    }\n");
-                w.write("                }\n");
             }
         }
-
         w.write("        }\n");
     }
 
@@ -370,8 +352,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return idx < 0 ? fqn : fqn.substring(0, idx);
     }
 
-    private static Integer extractIntAttr(final AnnotationMirror am, final String name) {
-        for (final var ev : am.getElementValues().entrySet()) {
+    private Integer extractIntAttr(final AnnotationMirror am, final String name) {
+        for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
             if (name.contentEquals(ev.getKey().getSimpleName())) {
                 return Integer.parseInt(ev.getValue().getValue().toString());
             }
@@ -380,9 +362,9 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return null;
     }
 
-    private static List<String> extractClassArrayAttr(final AnnotationMirror am, final String name) {
+    private List<String> extractClassArrayAttr(final AnnotationMirror am, final String name) {
         final List<String> r = new ArrayList<>();
-        for (final var ev : am.getElementValues().entrySet()) {
+        for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
             if (name.contentEquals(ev.getKey().getSimpleName())) {
                 final String s = ev.getValue().getValue().toString();
                 if (s.startsWith("[") && s.endsWith("]")) {
