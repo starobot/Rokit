@@ -3,12 +3,8 @@ package bot.staro.rokit;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
-public class Builder {
-    protected final Map<Class<?>, EventWrapper<?>> wrappers;
-
-    protected Builder() {
-        wrappers = new IdentityHashMap<>();
-    }
+public final class Builder {
+    private final Map<Class<?>, EventWrapper<?>> wrappers = new IdentityHashMap<>();
 
     public <T> Builder wrap(final Class<T> eventType, final EventWrapper<T> wrapper) {
         wrappers.put(eventType, wrapper);
@@ -21,9 +17,7 @@ public class Builder {
     }
 
     public RokitEventBus build() {
-        RokitEventBus bus = new RokitEventBus();
-        bus.wrappers.putAll(wrappers);
-        return bus;
+        return new RokitEventBus(Map.copyOf(wrappers));
     }
 
 }

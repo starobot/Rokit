@@ -14,7 +14,15 @@ public interface EventBus {
     <E> void post(E event);
 
     /**
-     * Subscribes a listener object by delegating to the compile-time-generated registAry.
+     * Dispatches an event to all registered consumers.
+     * @param event is a generic object that is to be dispatched.
+     * @param id is an id of the event.
+     * @param <E> is a generic type.
+     */
+    <E> void post(E event, int id);
+
+    /**
+     * Subscribes a listener object by delegating to the compile-time-generated registry.
      * @param subscriber is an object that is being subscribed for receiving listeners.
      */
     void subscribe(Object subscriber);

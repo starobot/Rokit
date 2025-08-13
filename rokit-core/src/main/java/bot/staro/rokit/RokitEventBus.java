@@ -1,39 +1,56 @@
 package bot.staro.rokit;
 
+import java.util.Map;
+
 // not final in case anyone decides to extend it.
 public class RokitEventBus extends EventRegistry implements EventBus {
-    protected RokitEventBus() {
+    protected RokitEventBus(final Map<Class<?>, EventWrapper<?>> wrappers) {
+        super(wrappers);
     }
 
-    @SuppressWarnings({"unchecked"})
     @Override
-    public <E> void post(final E event) {
+    public final <E> void post(final E event) {
         final int id = REGISTRY.getEventId(event.getClass());
         if (id >= 0) {
-            final EventConsumer<E>[] a = (EventConsumer<E>[]) listeners[id];
-            int i = a.length;
-            while (i-- != 0) {
-                a[i].accept(event);
-            }
+            post(event, id);
         }
     }
 
     @Override
-    public void subscribe(final Object subscriber) {
+    public final <E> void post(final E event, final int id) {
+        final EventConsumer<E>[] a = listenersForId(id);
+        switch (a.length) {
+            case 0:
+                return;
+            case 1:
+                a[0].accept(event);
+                return;
+            case 2:
+                a[1].accept(event); a[0].accept(event);
+                return;
+            default:
+                for (int i = a.length; --i >= 0; ) {
+                    a[i].accept(event);
+                }
+        }
+    }
+
+    @Override
+    public final void subscribe(final Object subscriber) {
         if (!isSubscribed(subscriber)) {
             REGISTRY.register(this, subscriber);
         }
     }
 
     @Override
-    public void unsubscribe(final Object subscriber) {
+    public final void unsubscribe(final Object subscriber) {
         if (isSubscribed(subscriber)) {
             REGISTRY.unregister(this, subscriber);
         }
     }
 
     @Override
-    public boolean isSubscribed(final Object subscriber) {
+    public final boolean isSubscribed(final Object subscriber) {
         return REGISTRY.subscribers().containsKey(subscriber);
     }
 
