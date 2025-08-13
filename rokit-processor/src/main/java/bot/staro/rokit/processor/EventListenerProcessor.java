@@ -215,15 +215,12 @@ public final class EventListenerProcessor extends AbstractProcessor {
             
             AnnotationMirror annoOnMethod = null;
             for (final AnnotationMirror am : m.getAnnotationMirrors()) {
-                if (am.getAnnotationType().asElement().equals(mi.annotation())) {
-                    annoOnMethod = am; break;
-                }
+                if (am.getAnnotationType().asElement().equals(mi.annotation())) { annoOnMethod = am; break; }
             }
 
-            final Integer wrappedAttr = (annoOnMethod == null) ? null : extractIntAttr(annoOnMethod, "wrapped");
-            final List<String> customProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "providers");
             final List<String> injectTypes = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectTypes");
             final List<String> injectProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectProviders");
+            final List<String> customProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "providers");
 
             if (injectTypes.size() != injectProviders.size()) {
                 processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
@@ -233,21 +230,26 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
             final Map<String,String> injectMap = new HashMap<>();
             for (int i = 0; i < injectTypes.size(); i++) {
-                injectMap.put(raw(injectTypes.get(i)), injectProviders.get(i));
+                injectMap.put(injectTypes.get(i), injectProviders.get(i));
             }
 
             final int paramCount = m.getParameters().size();
-            final int wrapped = (wrappedAttr == null) ? 0 : wrappedAttr;
-            final int nonWrapped = Math.max(0, paramCount - 1 - wrapped);
+            final int totalExtras = Math.max(0, paramCount - 1);
+            int wrapped = 0;
+            for (int i = 1; i < paramCount; i++) {
+                final String pt = raw(m.getParameters().get(i).asType().toString());
+                if (injectMap.containsKey(pt)) break;
+                wrapped++;
+            }
+            final int nonWrapped = totalExtras - wrapped;
 
             final List<String> provExpr = new ArrayList<>(nonWrapped);
             int customIdx = 0;
-
             for (int i = 1 + wrapped; i < paramCount; i++) {
                 final String pt = raw(m.getParameters().get(i).asType().toString());
-                final String mappedProvider = injectMap.get(pt);
-                if (mappedProvider != null) {
-                    provExpr.add("new " + mappedProvider + "()");
+                final String mapped = injectMap.get(pt);
+                if (mapped != null) {
+                    provExpr.add("new " + mapped + "()");
                 } else {
                     if (customIdx >= customProviders.size()) {
                         processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
@@ -258,9 +260,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
                     provExpr.add("new " + customProviders.get(customIdx++) + "()");
                 }
             }
-            if (provExpr.isEmpty() && nonWrapped > 0) {
-                continue;
-            }
+            if (provExpr.isEmpty() && nonWrapped > 0) continue; // error reported
             if (customIdx < customProviders.size()) {
                 processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
                         "Too many providers specified; " + customProviders.size()
@@ -338,16 +338,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return 0;
     }
 
-    private Integer extractIntAttr(final AnnotationMirror am, final String name) {
-        for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
-            if (name.contentEquals(ev.getKey().getSimpleName())) {
-                return Integer.parseInt(ev.getValue().getValue().toString());
-            }
-        }
-
-        return null;
-    }
-
     private List<String> extractClassArrayAttr(final AnnotationMirror am, final String name) {
         final List<String> r = new ArrayList<>();
         for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
@@ -356,15 +346,21 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 if (s.startsWith("[") && s.endsWith("]")) {
                     final String body = s.substring(1, s.length() - 1).trim();
                     if (!body.isEmpty()) {
-                        for (final String e : body.split(",")) r.add(raw(e.trim()));
+                        for (final String e : body.split(",")) {
+                            r.add(stripClassSuffix(e.trim()));
+                        }
                     }
                 } else if (!s.isEmpty()) {
-                    r.add(raw(s));
+                    r.add(stripClassSuffix(s.trim()));
                 }
             }
         }
 
         return r;
+    }
+
+    private static String stripClassSuffix(final String s) {
+        return s.endsWith(".class") ? s.substring(0, s.length() - 6) : s;
     }
 
     private static String raw(final String fqn) {
