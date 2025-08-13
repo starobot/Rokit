@@ -5,6 +5,7 @@ import com.google.auto.service.AutoService;
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
+import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
@@ -36,7 +37,9 @@ public final class EventListenerProcessor extends AbstractProcessor {
     public boolean process(final Set<? extends TypeElement> annotations, final RoundEnvironment env) {
         final Set<TypeElement> listenerAnnos = new LinkedHashSet<>();
         final TypeElement builtin = elements.getTypeElement("bot.staro.rokit.Listener");
-        if (builtin != null) listenerAnnos.add(builtin);
+        if (builtin != null) {
+            listenerAnnos.add(builtin);
+        }
 
         final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
         if (marker != null) {
@@ -57,13 +60,16 @@ public final class EventListenerProcessor extends AbstractProcessor {
             }
         }
 
-        if (byClass.isEmpty()) return false;
+        if (byClass.isEmpty()) {
+            return false;
+        }
 
         try {
             writeFiles(builtin, listenerAnnos, byClass);
         } catch (IOException ex) {
             processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, "Rokit processor error: " + ex);
         }
+
         return true;
     }
 
@@ -191,14 +197,18 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 """.formatted(evtType, name, prio));
                 } else {
                     final int extras = m.getParameters().size() - 1;
-                    final StringBuilder guardDecls = new StringBuilder();
-                    final StringBuilder callArgs = new StringBuilder();
+                    final StringBuilder args = new StringBuilder();
                     for (int i = 1; i < m.getParameters().size(); i++) {
                         final String pt = raw(m.getParameters().get(i).asType().toString());
-                        final String var = "a" + (i - 1);
-                        guardDecls.append("                            final Object ").append(var).append(" = w[").append(i - 1).append("];\n");
-                        guardDecls.append("                            if (").append(var).append(" != null && !(").append(var).append(" instanceof ").append(pt).append(")) return;\n");
-                        callArgs.append(", (").append(pt).append(") ").append(var);
+                        if (!args.isEmpty()) args.append(", ");
+                        args.append("(").append(pt).append(") w[").append(i - 1).append("]");
+                    }
+
+                    final StringBuilder guards = new StringBuilder();
+                    for (int i = 1; i < m.getParameters().size(); i++) {
+                        final String pt = raw(m.getParameters().get(i).asType().toString());
+                        guards.append("                            final Object a").append(i - 1).append(" = w[").append(i - 1).append("];\n")
+                                .append("                            if (a").append(i - 1).append(" != null && !(a").append(i - 1).append(" instanceof ").append(pt).append(")) return;\n");
                     }
 
                     w.write("""
@@ -209,31 +219,31 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         @Override public void accept(%1$s e) {
                             if (w0 == null) return;
                             w0.wrapInto(e, w);
-%3$s
-                            l.%4$s(e%5$s);
+%4$s
+                            l.%3$s(e, %5$s);
                         }
                         @Override public int getPriority() { return %6$d; }
                         @Override public Class<%1$s> getEventType() { return %1$s.class; }
                     };
                     tmp.add(c);
                 }
-                """.formatted(evtType, extras, guardDecls.toString(), name, callArgs.toString(), prio));
+                """.formatted(evtType, extras, name,
+                            guards.toString(),
+                            args.isEmpty() ? "" : args.toString(),
+                            prio));
                 }
+
                 continue;
             }
 
             AnnotationMirror annoOnMethod = null;
             for (final AnnotationMirror am : m.getAnnotationMirrors()) {
-                if (am.getAnnotationType().asElement().equals(mi.annotation())) {
-                    annoOnMethod = am;
-                    break;
-                }
+                if (am.getAnnotationType().asElement().equals(mi.annotation())) { annoOnMethod = am; break; }
             }
 
             final List<String> injectTypes = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectTypes");
             final List<String> injectProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectProviders");
             final List<String> customProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "providers");
-
             if (injectTypes.size() != injectProviders.size()) {
                 processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
                         "injectTypes.length must equal injectProviders.length", m);
@@ -272,11 +282,14 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         provExpr.clear();
                         break;
                     }
+
                     provExpr.add("new " + customProviders.get(customIdx++) + "()");
                 }
             }
+            if (provExpr.isEmpty() && nonWrapped > 0) {
+                continue;
+            }
 
-            if (provExpr.isEmpty() && nonWrapped > 0) continue; // error reported
             if (customIdx < customProviders.size()) {
                 processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
                         "Too many providers specified; " + customProviders.size()
@@ -296,48 +309,30 @@ public final class EventListenerProcessor extends AbstractProcessor {
             }
 
             final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
-            final StringBuilder guardDeclsWrapped = new StringBuilder();
-            final StringBuilder guardDeclsProvided = new StringBuilder();
-            final StringBuilder callArgs = new StringBuilder();
-
-            for (int i = 0; i < wrapped; i++) {
-                final String pt = raw(m.getParameters().get(1 + i).asType().toString());
-                final String var = "w" + i;
-                guardDeclsWrapped.append("                        final Object ").append(var).append(" = wrapped[").append(i).append("];\n");
-                guardDeclsWrapped.append("                        if (").append(var).append(" != null && !(").append(var).append(" instanceof ").append(pt).append(")) return;\n");
-                callArgs.append(", (").append(pt).append(") ").append(var);
-            }
-
-            for (int i = 0; i < nonWrapped; i++) {
-                final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
-                final String var = "p" + i;
-                guardDeclsProvided.append("                        final Object ").append(var).append(" = provided[").append(i).append("];\n");
-                guardDeclsProvided.append("                        if (").append(var).append(" != null && !(").append(var).append(" instanceof ").append(pt).append(")) return;\n");
-                callArgs.append(", (").append(pt).append(") ").append(var);
-            }
-
             w.write("""
                 final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
                     @Override
                     public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
                         final %2$s l0 = (%2$s) listener;
-%3$s%4$s
-                        l0.%5$s(e%6$s);
+            """.formatted(evtType, owner));
+            w.write("                        l0." + name + "(e");
+            for (int i = 0; i < wrapped; i++) {
+                final String pt = raw(m.getParameters().get(1 + i).asType().toString());
+                w.write(", (" + pt + ") wrapped[" + i + "]");
+            }
+            for (int i = 0; i < nonWrapped; i++) {
+                final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
+                w.write(", (" + pt + ") provided[" + i + "]");
+            }
+            w.write(");\n");
+            w.write("""
                     }
                 };
                 @SuppressWarnings("unchecked")
-                final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %7$s().createConsumer(bus, l, inv, %8$d, %1$s.class, %9$d, prov);
+                final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %2$s().createConsumer(bus, l, inv, %3$d, %1$s.class, %4$d, prov);
                 tmp.add(c);
             }
-            """.formatted(evtType,
-                    owner,
-                    guardDeclsWrapped.toString(),
-                    guardDeclsProvided.toString(),
-                    name,
-                    callArgs.toString(),
-                    handlerSimple,
-                    prio,
-                    wrapped));
+            """.formatted(evtType, handlerSimple, prio, wrapped));
         }
 
         w.write("        }\n");
@@ -354,7 +349,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
             }
         }
-
         return "bot.staro.rokit.impl.DefaultListenerHandler";
     }
 
@@ -368,29 +362,53 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
             }
         }
-
         return 0;
     }
 
     private List<String> extractClassArrayAttr(final AnnotationMirror am, final String name) {
-        final List<String> r = new ArrayList<>();
         for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
-            if (name.contentEquals(ev.getKey().getSimpleName())) {
-                final String s = ev.getValue().getValue().toString();
-                if (s.startsWith("[") && s.endsWith("]")) {
-                    final String body = s.substring(1, s.length() - 1).trim();
-                    if (!body.isEmpty()) {
-                        for (final String e : body.split(",")) {
-                            r.add(stripClassSuffix(e.trim()));
+            if (!name.contentEquals(ev.getKey().getSimpleName())) {
+                continue;
+            }
+
+            final Object v = ev.getValue().getValue();
+            final List<String> out = new ArrayList<>();
+            if (v instanceof List<?> list) {
+                for (Object o : list) {
+                    if (o instanceof AnnotationValue av) {
+                        final Object vv = av.getValue();
+                        if (vv instanceof TypeMirror tm) {
+                            out.add(stripClassSuffix(tm.toString()));
+                        } else if (vv != null) {
+                            out.add(stripClassSuffix(vv.toString()));
                         }
                     }
-                } else if (!s.isEmpty()) {
-                    r.add(stripClassSuffix(s.trim()));
                 }
+
+                return out;
             }
+
+            if (v instanceof TypeMirror tm) {
+                out.add(stripClassSuffix(tm.toString()));
+                return out;
+            }
+
+            final String s = String.valueOf(v);
+            if (s.startsWith("[") && s.endsWith("]")) {
+                final String body = s.substring(1, s.length() - 1).trim();
+                if (!body.isEmpty()) {
+                    for (final String e : body.split(",")) {
+                        out.add(stripClassSuffix(e.trim()));
+                    }
+                }
+            } else if (!s.isEmpty()) {
+                out.add(stripClassSuffix(s.trim()));
+            }
+
+            return out;
         }
 
-        return r;
+        return List.of();
     }
 
     private static String stripClassSuffix(final String s) {

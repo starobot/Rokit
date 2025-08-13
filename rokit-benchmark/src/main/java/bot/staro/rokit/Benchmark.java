@@ -5,7 +5,9 @@ import bot.staro.rokit.rokitbus.RokitListener;
 
 public final class Benchmark {
     public static void main(String[] args) {
-        EventBus eventBus = RokitEventBus.builder().build();
+        EventBus eventBus = RokitEventBus.builder()
+                .wrap(WrappedEvent.class, WrappedEvent::getObject)
+                .build();
         var rokitListener = new RokitListener();
         var additionalListener = new AdditionalLIstener();
         var event = new Event();
@@ -19,6 +21,7 @@ public final class Benchmark {
         eventBus.subscribe(rokitListener);
         eventBus.subscribe(additionalListener);
         eventBus.post(SingletonEvent.getInstance());
+        eventBus.post(new WrappedEvent<>("Message from wrapped event received!"));
 
         var rokitResults = new long[BenchmarkUtil.BENCHMARK_ITERATIONS];
         for (int i = 0; i < BenchmarkUtil.BENCHMARK_ITERATIONS; i++) {
