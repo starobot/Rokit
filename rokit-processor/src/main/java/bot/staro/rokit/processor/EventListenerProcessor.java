@@ -186,15 +186,15 @@ public final class EventListenerProcessor extends AbstractProcessor {
             if (mi.annotation().equals(builtin)) {
                 if (m.getParameters().size() == 1) {
                     w.write("""
-                {
-                    final EventConsumer<%1$s> c = new EventConsumer<>() {
-                        @Override public void accept(%1$s e) { l.%2$s(e); }
-                        @Override public int getPriority() { return %3$d; }
-                        @Override public Class<%1$s> getEventType() { return %1$s.class; }
-                    };
-                    tmp.add(c);
-                }
-                """.formatted(evtType, name, prio));
+da            {
+                final EventConsumer<%1$s> c = new EventConsumer<>() {
+                    @Override public void accept(%1$s e) { l.%2$s(e); }
+                    @Override public int getPriority() { return %3$d; }
+                    @Override public Class<%1$s> getEventType() { return %1$s.class; }
+                };
+                tmp.add(c);
+            }
+            """.formatted(evtType, name, prio));
                 } else {
                     final int extras = m.getParameters().size() - 1;
                     final StringBuilder args = new StringBuilder();
@@ -212,22 +212,22 @@ public final class EventListenerProcessor extends AbstractProcessor {
                     }
 
                     w.write("""
-                {
-                    final EventConsumer<%1$s> c = new EventConsumer<>() {
-                        final EventWrapper<%1$s> w0 = bus.getWrapper(%1$s.class);
-                        final Object[] w = new Object[%2$d];
-                        @Override public void accept(%1$s e) {
-                            if (w0 == null) return;
-                            w0.wrapInto(e, w);
+            {
+                final EventConsumer<%1$s> c = new EventConsumer<>() {
+                    final EventWrapper<%1$s> w0 = bus.getWrapper(%1$s.class);
+                    final Object[] w = new Object[%2$d];
+                    @Override public void accept(%1$s e) {
+                        if (w0 == null) return;
+                        w0.wrapInto(e, w);
 %4$s
-                            l.%3$s(e, %5$s);
-                        }
-                        @Override public int getPriority() { return %6$d; }
-                        @Override public Class<%1$s> getEventType() { return %1$s.class; }
-                    };
-                    tmp.add(c);
-                }
-                """.formatted(evtType, extras, name,
+                        l.%3$s(e, %5$s);
+                    }
+                    @Override public int getPriority() { return %6$d; }
+                    @Override public Class<%1$s> getEventType() { return %1$s.class; }
+                };
+                tmp.add(c);
+            }
+            """.formatted(evtType, extras, name,
                             guards.toString(),
                             args.isEmpty() ? "" : args.toString(),
                             prio));
@@ -263,7 +263,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 if (injectMap.containsKey(pt)) {
                     break;
                 }
-
                 wrapped++;
             }
 
@@ -282,10 +281,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         provExpr.clear();
                         break;
                     }
-
                     provExpr.add("new " + customProviders.get(customIdx++) + "()");
                 }
             }
+
             if (provExpr.isEmpty() && nonWrapped > 0) {
                 continue;
             }
@@ -310,33 +309,53 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
             final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
             w.write("""
-                final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
-                    @Override
-                    public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
-                        final %2$s l0 = (%2$s) listener;
-            """.formatted(evtType, owner));
-            w.write("                        l0." + name + "(e");
+            final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
+                @Override
+                public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
+                    final %2$s l0 = (%2$s) listener;
+        """.formatted(evtType, owner));
+
+            if (wrapped > 0) {
+                for (int i = 0; i < wrapped; i++) {
+                    final String pt = raw(m.getParameters().get(1 + i).asType().toString());
+                    w.write("                    final Object w" + i + " = wrapped[" + i + "];\n");
+                    w.write("                    if (w" + i + " != null && !(w" + i + " instanceof " + pt + ")) return;\n");
+                }
+            }
+
+            if (nonWrapped > 0) {
+                for (int i = 0; i < nonWrapped; i++) {
+                    final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
+                    w.write("                    final Object p" + i + " = provided[" + i + "];\n");
+                    w.write("                    if (p" + i + " != null && !(p" + i + " instanceof " + pt + ")) return;\n");
+                }
+            }
+
+            w.write("                    l0." + name + "(e");
             for (int i = 0; i < wrapped; i++) {
                 final String pt = raw(m.getParameters().get(1 + i).asType().toString());
                 w.write(", (" + pt + ") wrapped[" + i + "]");
             }
+
             for (int i = 0; i < nonWrapped; i++) {
                 final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
                 w.write(", (" + pt + ") provided[" + i + "]");
             }
+
             w.write(");\n");
             w.write("""
-                    }
-                };
-                @SuppressWarnings("unchecked")
-                final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %2$s().createConsumer(bus, l, inv, %3$d, %1$s.class, %4$d, prov);
-                tmp.add(c);
-            }
-            """.formatted(evtType, handlerSimple, prio, wrapped));
+                }
+            };
+            @SuppressWarnings("unchecked")
+            final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %2$s().createConsumer(bus, l, inv, %3$d, %1$s.class, %4$d, prov);
+            tmp.add(c);
+        }
+        """.formatted(evtType, handlerSimple, prio, wrapped));
         }
 
         w.write("        }\n");
     }
+
 
     private String extractHandler(final TypeElement annotation) {
         final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");

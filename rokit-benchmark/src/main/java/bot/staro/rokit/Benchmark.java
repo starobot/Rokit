@@ -5,12 +5,12 @@ import bot.staro.rokit.rokitbus.RokitListener;
 
 public final class Benchmark {
     public static void main(String[] args) {
-        EventBus eventBus = RokitEventBus.builder()
+        final EventBus eventBus = RokitEventBus.builder()
                 .wrap(WrappedEvent.class, WrappedEvent::getObject)
                 .build();
-        var rokitListener = new RokitListener();
-        var additionalListener = new AdditionalLIstener();
-        var event = new Event();
+        final var rokitListener = new RokitListener();
+        final var additionalListener = new AdditionalLIstener();
+        final Event event = new Event();
 
         // JVM warmup
         BenchmarkUtil.runWarmup(() -> eventBus.subscribe(rokitListener), () -> eventBus.post(event), () -> eventBus.unsubscribe(rokitListener));
