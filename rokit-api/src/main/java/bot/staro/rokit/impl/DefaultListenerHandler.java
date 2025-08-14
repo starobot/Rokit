@@ -20,8 +20,6 @@ public final class DefaultListenerHandler implements AnnotationHandler {
                                                final ArgProvider<? super E>[] providers) {
         return new EventConsumer<>() {
             final EventWrapper<E> w0 = wrappedCount == 0 ? null : bus.getWrapper(eventType);
-            final Object[] wrappedBuf = wrappedCount == 0 ? null : new Object[wrappedCount];
-            final Object[] providedBuf = providers.length == 0 ? null : new Object[providers.length];
 
             {
                 if (w0 != null && w0.arity() != wrappedCount) {
@@ -32,12 +30,13 @@ public final class DefaultListenerHandler implements AnnotationHandler {
             @Override
             public void accept(final E e) {
                 if (wrappedCount == 0) {
-                    if (providedBuf != null) {
+                    if (providers.length != 0) {
+                        final Object[] buf = new Object[providers.length];
                         for (int i = 0; i < providers.length; i++) {
-                            providedBuf[i] = providers[i].get(bus, listenerInstance, e);
+                            buf[i] = providers[i].get(bus, listenerInstance, e);
                         }
 
-                        invoker.call(listenerInstance, e, EMPTY, providedBuf);
+                        invoker.call(listenerInstance, e, EMPTY, buf);
                     } else {
                         invoker.call(listenerInstance, e, EMPTY, EMPTY);
                     }
@@ -49,12 +48,14 @@ public final class DefaultListenerHandler implements AnnotationHandler {
                     return;
                 }
 
+                final Object[] wrappedBuf = new Object[wrappedCount];
                 w0.wrapInto(e, wrappedBuf);
-
-                if (providedBuf != null) {
+                if (providers.length != 0) {
+                    final Object[] providedBuf = new Object[providers.length];
                     for (int i = 0; i < providers.length; i++) {
                         providedBuf[i] = providers[i].get(bus, listenerInstance, e);
                     }
+
                     invoker.call(listenerInstance, e, wrappedBuf, providedBuf);
                 } else {
                     invoker.call(listenerInstance, e, wrappedBuf, EMPTY);
