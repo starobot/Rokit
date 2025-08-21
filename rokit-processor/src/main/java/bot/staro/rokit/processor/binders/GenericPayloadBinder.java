@@ -13,7 +13,7 @@ import java.util.Set;
 
 public final class GenericPayloadBinder implements ParamBinder {
     private static final String[] CANDIDATE_ACCESSORS = new String[] {
-            "getObject", "getPayload", "payload", "get", "value", "getValue", "object", "data"
+            "getObject", "getPayload", "payload", "get", "value", "getValue", "object", "data", "packet", "getPacket"
     };
 
     @Override
