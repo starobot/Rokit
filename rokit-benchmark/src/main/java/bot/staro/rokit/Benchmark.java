@@ -1,16 +1,15 @@
 package bot.staro.rokit;
 
-import bot.staro.rokit.rokitbus.AdditionalLIstener;
+import bot.staro.rokit.rokitbus.AdditionalListener;
 import bot.staro.rokit.rokitbus.RokitListener;
 
 public final class Benchmark {
     public static void main(String[] args) {
-        final EventBus eventBus = RokitEventBus.builder()
-                .wrap(WrappedEvent.class, WrappedEvent::getObject)
-                .build();
-        final var rokitListener = new RokitListener();
-        final var additionalListener = new AdditionalLIstener();
+        final EventBus eventBus = RokitEventBus.builder().build();
+        final RokitListener rokitListener = new RokitListener();
+        final AdditionalListener additionalListener = new AdditionalListener();
         final Event event = new Event();
+        final WrappedEvent<String> wrapped = new WrappedEvent<>("Message from wrapped event received!");
 
         // JVM warmup
         BenchmarkUtil.runWarmup(() -> eventBus.subscribe(rokitListener), () -> eventBus.post(event), () -> eventBus.unsubscribe(rokitListener));
@@ -21,7 +20,10 @@ public final class Benchmark {
         eventBus.subscribe(rokitListener);
         eventBus.subscribe(additionalListener);
         eventBus.post(SingletonEvent.getInstance());
-        eventBus.post(new WrappedEvent<>("Message from wrapped event received!"));
+
+        //eventBus.unsubscribe(rokitListener);
+        eventBus.post(wrapped);
+        //eventBus.subscribe(rokitListener);
 
         var rokitResults = new long[BenchmarkUtil.BENCHMARK_ITERATIONS];
         for (int i = 0; i < BenchmarkUtil.BENCHMARK_ITERATIONS; i++) {

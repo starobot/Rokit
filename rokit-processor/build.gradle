@@ -1,10 +1,25 @@
 plugins {
-    id 'java-library'
+    id 'java'
     id 'maven-publish'
 }
 
+group = 'bot.staro.rokit'
+version = '3.0.0'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+    withSourcesJar()
+    withJavadocJar()
+}
+
 dependencies {
-    compileOnly project(":rokit-api")
-    compileOnly 'com.google.auto.service:auto-service-annotations:1.0.1'
-    annotationProcessor 'com.google.auto.service:auto-service:1.0.1'
+    implementation project(':rokit-api')
+    implementation project(':rokit-processor-spi')
+
+    compileOnly 'com.google.auto.service:auto-service-annotations:1.1.1'
+    annotationProcessor 'com.google.auto.service:auto-service:1.1.1'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release.set(21)
 }

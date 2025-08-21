@@ -1,15 +1,15 @@
 package bot.staro.rokit.processor;
 
+import bot.staro.rokit.spi.ParamBinder;
+import bot.staro.rokit.spi.ProviderAwareBinder;
 import com.google.auto.service.AutoService;
 
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
-import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
-import javax.tools.StandardLocation;
 import java.io.IOException;
 import java.io.Writer;
 import java.util.*;
@@ -18,358 +18,745 @@ import java.util.*;
 @AutoService(javax.annotation.processing.Processor.class)
 @SupportedSourceVersion(SourceVersion.RELEASE_21)
 @SupportedAnnotationTypes("*")
-@SupportedOptions("rokit.generatedPackage")
+@SupportedOptions({"rokit.generatedPackage"})
 public final class EventListenerProcessor extends AbstractProcessor {
-    private static final String DEF_PKG = "bot.staro.rokit.generated";
-    private static final String GEN_NAME = "EventListenerRegistry";
-    private static final String SERVICE_PATH = "META-INF/services/bot.staro.rokit.gen.GeneratedRegistry";
+    private static final String GEN_PKG = "bot.staro.rokit.generated";
+    private static final String BOOTSTRAP = "GeneratedBootstrap";
 
     private Elements elements;
-    private boolean firstBranch;
+    private Messager messager;
+    private Filer filer;
+    private String genPkg = GEN_PKG;
+    private boolean hadError = false;
+
+    private List<ParamBinder> paramBinders;
 
     @Override
-    public synchronized void init(ProcessingEnvironment env) {
-        super.init(env);
-        elements = env.getElementUtils();
+    public synchronized void init(final ProcessingEnvironment environment) {
+        super.init(environment);
+        this.elements = environment.getElementUtils();
+        this.messager = environment.getMessager();
+        this.filer = environment.getFiler();
+
+        final String opt = environment.getOptions().get("rokit.generatedPackage");
+        if (opt != null && !opt.isBlank()) {
+            this.genPkg = opt.trim();
+        }
+
+        this.paramBinders = new ArrayList<>();
+        this.paramBinders.add(new bot.staro.rokit.processor.binders.GenericPayloadBinder());
     }
 
     @Override
-    public boolean process(final Set<? extends TypeElement> annotations, final RoundEnvironment env) {
-        final Set<TypeElement> listenerAnnos = new LinkedHashSet<>();
-        final TypeElement builtin = elements.getTypeElement("bot.staro.rokit.Listener");
-        if (builtin != null) {
-            listenerAnnos.add(builtin);
+    public boolean process(final Set<? extends TypeElement> annotations, final RoundEnvironment roundEnv) {
+        final TypeElement listenerAnno = elements.getTypeElement("bot.staro.rokit.Listener");
+        final TypeElement listenerMarker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
+        final Set<TypeElement> listenerAnnotations = new LinkedHashSet<>();
+        if (listenerAnno != null) {
+            listenerAnnotations.add(listenerAnno);
         }
 
-        final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
-        if (marker != null) {
-            for (final Element e : env.getElementsAnnotatedWith(marker)) {
+        if (listenerMarker != null) {
+            for (final Element e : roundEnv.getElementsAnnotatedWith(listenerMarker)) {
                 if (e.getKind() == ElementKind.ANNOTATION_TYPE) {
-                    listenerAnnos.add((TypeElement) e);
+                    listenerAnnotations.add((TypeElement) e);
                 }
             }
         }
 
-        final Map<String, List<MethodInfo>> byClass = new LinkedHashMap<>();
-        for (final TypeElement anno : listenerAnnos) {
-            for (final Element e : env.getElementsAnnotatedWith(anno)) {
-                if (e instanceof ExecutableElement m) {
-                    final String owner = ((TypeElement) m.getEnclosingElement()).getQualifiedName().toString();
-                    byClass.computeIfAbsent(owner, k -> new ArrayList<>()).add(new MethodInfo(anno, m));
+        if (listenerAnnotations.isEmpty()) {
+            return false;
+        }
+
+        final Map<String, List<MethodInfo>> byOwner = new LinkedHashMap<>();
+        for (final TypeElement anno : listenerAnnotations) {
+            for (final Element e : roundEnv.getElementsAnnotatedWith(anno)) {
+                if (!(e instanceof ExecutableElement method)) {
+                    continue;
+                }
+
+                final String owner = ((TypeElement) method.getEnclosingElement()).getQualifiedName().toString();
+                byOwner.computeIfAbsent(owner, k -> new ArrayList<>()).add(new MethodInfo(anno, method));
+            }
+        }
+
+        if (byOwner.isEmpty()) {
+            return false;
+        }
+
+        final Map<String, EventModel> events = new LinkedHashMap<>();
+        for (final List<MethodInfo> methods : byOwner.values()) {
+            for (final MethodInfo mi : methods) {
+                final ExecutableElement method = mi.method;
+                if (!method.getModifiers().contains(Modifier.PUBLIC)) {
+                    continue;
+                }
+
+                final List<? extends VariableElement> params = method.getParameters();
+                if (params.isEmpty()) {
+                    error(method, "Listener method must have at least the event parameter.");
+                    continue;
+                }
+
+                final VariableElement eventParam = params.getFirst();
+                final String eventFqn = raw(eventParam.asType().toString());
+
+                final EventModel event = events.computeIfAbsent(eventFqn, EventModel::new);
+
+                final String ownerFqn = ((TypeElement) method.getEnclosingElement()).getQualifiedName().toString();
+                final String methodName = method.getSimpleName().toString();
+                final int priority = extractPriority(method, mi.annotation);
+
+                final List<ParamPlan> paramPlans = new ArrayList<>();
+                final List<String> signatureTypes = new ArrayList<>();
+
+                for (int i = 1; i < params.size(); i++) {
+                    final VariableElement param = params.get(i);
+                    final String declaredType = raw(param.asType().toString());
+                    ParamBinder.Binding binding = null;
+                    ParamBinder usedBinder = null;
+                    String patternKey = null;
+
+                    for (final ParamBinder b : paramBinders) {
+                        try {
+                            if (b.supports(method, param, processingEnv)) {
+                                binding = b.plan(method, param, processingEnv);
+                                patternKey = b.patternKey(method, param, processingEnv);
+                                usedBinder = b;
+                                break;
+                            }
+                        } catch (final Exception ex) {
+                            error(method, "ParamBinder failed on parameter %d: %s", i, ex.getMessage());
+                            binding = null;
+                            break;
+                        }
+                    }
+
+                    if (binding == null) {
+                        error(method, "No ParamBinder supports parameter %d of type %s in %s#%s.",
+                                i, declaredType, ownerFqn, methodName);
+                        continue;
+                    }
+
+                    final Set<String> guardBits = new TreeSet<>(binding.guardBits());
+
+                    Map<String,String> requiredProviders = Collections.emptyMap();
+                    if (usedBinder instanceof ProviderAwareBinder paw) {
+                        try {
+                            requiredProviders = paw.requiredProviders(method, param, processingEnv);
+                        } catch (final Exception ignored) {
+                        }
+                    }
+
+                    if (requiredProviders != null && !requiredProviders.isEmpty()) {
+                        for (final var e : requiredProviders.entrySet()) {
+                            event.registerGuard(e.getKey(), raw(e.getValue()));
+                        }
+                    } else if (!guardBits.isEmpty()) {
+                        for (final String g : guardBits) {
+                            event.registerGuard(g, declaredType);
+                        }
+                    }
+
+                    final Set<ParamBinder.Extractor> extractors = new LinkedHashSet<>(binding.extractors());
+                    for (final ParamBinder.Extractor ex : extractors) {
+                        event.registerExtractor(ex.localName(), raw(ex.declaredType()), ex.initExpression());
+                    }
+
+                    final ParamPlan plan = new ParamPlan(
+                            i - 1,
+                            declaredType,
+                            nonNull(patternKey, "patternKey"),
+                            guardBits,
+                            extractors,
+                            nonNull(binding.argumentExpression(), "argumentExpression")
+                    );
+                    paramPlans.add(plan);
+                    signatureTypes.add(declaredType);
+                }
+
+                final String signatureKey = String.join("|", signatureTypes);
+                final Set<String> allGuards = new TreeSet<>();
+                final Set<String> allExtractorLocals = new TreeSet<>();
+                for (final ParamPlan p : paramPlans) {
+                    allGuards.addAll(p.guardBits);
+                    for (final ParamBinder.Extractor ex : p.extractors) {
+                        allExtractorLocals.add(ex.localName());
+                    }
+                }
+
+                final String conditionKey = "G:" + String.join(",", allGuards) + ";X:" + String.join(",", allExtractorLocals);
+                final ListenerModel lm = new ListenerModel(
+                        ownerFqn,
+                        methodName,
+                        priority,
+                        eventFqn,
+                        signatureKey,
+                        paramPlans
+                );
+
+                event.addListener(conditionKey, signatureKey, lm);
+            }
+        }
+
+        if (events.isEmpty()) {
+            return false;
+        }
+
+        final List<String> eventOrder = new ArrayList<>(events.keySet());
+        Collections.sort(eventOrder);
+        final Map<String, Integer> eventIds = new HashMap<>();
+        for (int i = 0; i < eventOrder.size(); i++) {
+            eventIds.put(eventOrder.get(i), i);
+        }
+
+        final LinkedHashMap<String, String> providerDeclTypes = new LinkedHashMap<>();
+        for (final EventModel em : events.values()) {
+            for (final Map.Entry<String, String> e : em.guardDeclaredTypes.entrySet()) {
+                final String name = e.getKey();
+                final String type = e.getValue();
+                final String prev = providerDeclTypes.putIfAbsent(name, type);
+                if (prev != null && !prev.equals(type)) {
+                    error(null, "Guard '%s' used with conflicting types: %s vs %s", name, prev, type);
                 }
             }
         }
 
-        if (byClass.isEmpty()) {
+        final Map<String, Integer> providerIds = new LinkedHashMap<>();
+        {
+            int idx = 0;
+            for (final String key : providerDeclTypes.keySet()) {
+                providerIds.put(key, idx++);
+            }
+        }
+
+        if (hadError) {
             return false;
         }
 
         try {
-            writeFiles(builtin, listenerAnnos, byClass);
-        } catch (IOException ex) {
-            processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR, "Rokit processor error: " + ex);
+            emitProviderKeysIfNeeded(providerDeclTypes);
+            emitBootstrapAndDispatchers(events, eventOrder, eventIds, providerDeclTypes, providerIds);
+        } catch (final IOException ex) {
+            messager.printMessage(Diagnostic.Kind.ERROR, "Rokit processor error: " + ex);
         }
 
         return true;
     }
 
-    private void writeFiles(final TypeElement builtin,
-                            final Set<TypeElement> listenerAnnos,
-                            final Map<String, List<MethodInfo>> byClass) throws IOException {
-
-        final String pkg = processingEnv.getOptions().getOrDefault("rokit.generatedPackage", DEF_PKG);
-        try (final Writer w = processingEnv.getFiler()
-                .createResource(StandardLocation.CLASS_OUTPUT, "", SERVICE_PATH)
-                .openWriter()) {
-            w.write(pkg + '.' + GEN_NAME);
-        }
-
-        JavaFileObject jfo;
-        try {
-            jfo = processingEnv.getFiler().createSourceFile(pkg + '.' + GEN_NAME);
-        } catch (FilerException ex) {
+    private void emitProviderKeysIfNeeded(final LinkedHashMap<String, String> providerDeclTypes) throws IOException {
+        if (providerDeclTypes.isEmpty()) {
             return;
         }
 
-        final Set<String> handlers = new TreeSet<>();
-        handlers.add("bot.staro.rokit.impl.DefaultListenerHandler");
-        for (final TypeElement anno : listenerAnnos) {
-            if (!anno.equals(builtin)) {
-                handlers.add(extractHandler(anno));
-            }
+        final String fqn = genPkg + ".ProviderKeys";
+        JavaFileObject jfo;
+        try {
+            jfo = filer.createSourceFile(fqn);
+        } catch (final FilerException ignore) {
+            return;
         }
 
         try (final Writer w = jfo.openWriter()) {
-            w.write("package " + pkg + ";\n\n");
-            w.write("import bot.staro.rokit.*;\n");
-            w.write("import bot.staro.rokit.gen.GeneratedRegistry;\n");
-            w.write("import java.util.*;\n");
-            w.write("import java.util.concurrent.ConcurrentHashMap;\n");
-            for (final String h : handlers) {
-                w.write("import " + h + ";\n");
+            w.write("package " + genPkg + ";\n\n");
+            w.write("public final class ProviderKeys {\n");
+            w.write("    private ProviderKeys() { }\n\n");
+            int idx = 0;
+            for (final String name : providerDeclTypes.keySet()) {
+                final String constName = sanitizeUpper(name);
+                w.write("    public static final int " + constName + " = " + idx + ";\n");
+                idx++;
             }
 
-            w.write("\npublic final class " + GEN_NAME + " implements GeneratedRegistry {\n");
-            w.write("    public static final Map<Object, EventConsumer<?>[]> SUBSCRIBERS = new ConcurrentHashMap<>();\n\n");
-
-            final int totalMethods = byClass.values().stream().mapToInt(List::size).sum();
-
-            w.write("    @Override\n");
-            w.write("    public void register(final ListenerRegistry bus, final Object sub) {\n");
-            w.write("        final java.util.List<bot.staro.rokit.EventConsumer<?>> tmp = new java.util.ArrayList<>(" + totalMethods + ");\n");
-            firstBranch = true;
-            byClass.entrySet().stream()
-                    .sorted((a, b) -> a.getKey().equals(b.getKey()) ? 0
-                            : elements.getTypeElement(b.getKey()).getSuperclass().toString().equals(a.getKey()) ? -1 : 1)
-                    .forEach(entry -> { try { emitBranch(w, entry, builtin); } catch (IOException e) { throw new RuntimeException(e); }});
-            w.write("        if (tmp.isEmpty()) return;\n");
-            w.write("        final bot.staro.rokit.EventConsumer<?>[] arr = tmp.toArray(new bot.staro.rokit.EventConsumer<?>[0]);\n");
-            w.write("        final bot.staro.rokit.EventConsumer<?>[] prev = SUBSCRIBERS.putIfAbsent(sub, arr);\n");
-            w.write("        if (prev != null) return;\n");
-            w.write("        for (final bot.staro.rokit.EventConsumer<?> c : arr) bus.internalRegister(c.getEventType(), c);\n");
-            w.write("    }\n\n");
-
-            w.write("    @Override\n");
-            w.write("    public void unregister(final ListenerRegistry bus, final Object sub) {\n");
-            w.write("        final EventConsumer<?>[] arr = SUBSCRIBERS.remove(sub);\n");
-            w.write("        if (arr != null) {\n");
-            w.write("            for (final EventConsumer<?> c : arr) bus.internalUnregister(c.getEventType(), c);\n");
-            w.write("        }\n");
-            w.write("    }\n\n");
-
-            final Set<String> types = new TreeSet<>();
-            for (final List<MethodInfo> methods : byClass.values()) {
-                for (final MethodInfo mi : methods) {
-                    types.add(raw(mi.method().getParameters().getFirst().asType().toString()) + ".class");
-                }
-            }
-
-            w.write("    public static final Class<?>[] EVENT_TYPES = {\n");
-            for (final String t : types) {
-                w.write("        " + t + ",\n");
-            }
-
-            w.write("    };\n\n");
-
-            w.write("    @Override\n");
-            w.write("    public int getEventId(final Class<?> c) {\n");
-            int id = 0;
-            for (final String t : types) {
-                final String cls = t.substring(0, t.length() - 6);
-                w.write("        " + (id == 0 ? "if" : "else if") + " (c == " + cls + ".class) return " + (id++) + ";\n");
-            }
-
-            w.write("        return -1;\n");
-            w.write("    }\n\n");
-
-            w.write("    @Override public Class<?>[] eventTypes() { return EVENT_TYPES; }\n");
-            w.write("    @Override public Map<Object, bot.staro.rokit.EventConsumer<?>[]> subscribers() { return SUBSCRIBERS; }\n");
             w.write("}\n");
         }
     }
 
-    private void emitBranch(final Writer w, final Map.Entry<String, List<MethodInfo>> entry, final TypeElement builtin) throws IOException {
-        final String owner = entry.getKey();
-        w.write("        " + (firstBranch ? "if" : "else if") + " (sub instanceof " + owner + " l) {\n");
-        firstBranch = false;
 
-        for (final MethodInfo mi : entry.getValue()) {
-            final ExecutableElement m = mi.method();
-            if (!m.getModifiers().contains(Modifier.PUBLIC)) {
-                continue;
-            }
-
-            final String evtType = raw(m.getParameters().getFirst().asType().toString());
-            final String name = m.getSimpleName().toString();
-            final int prio = extractPriority(m, mi.annotation());
-
-            if (mi.annotation().equals(builtin)) {
-                if (m.getParameters().size() == 1) {
-                    w.write("""
-            {
-                final EventConsumer<%1$s> c = new EventConsumer<>() {
-                    @Override public void accept(%1$s e) { l.%2$s(e); }
-                    @Override public int getPriority() { return %3$d; }
-                    @Override public Class<%1$s> getEventType() { return %1$s.class; }
-                };
-                tmp.add(c);
-            }
-            """.formatted(evtType, name, prio));
-                } else {
-                    final int extras = m.getParameters().size() - 1;
-                    final StringBuilder args = new StringBuilder();
-                    for (int i = 1; i < m.getParameters().size(); i++) {
-                        final String pt = raw(m.getParameters().get(i).asType().toString());
-                        if (!args.isEmpty()) args.append(", ");
-                        args.append("(").append(pt).append(") w[").append(i - 1).append("]");
-                    }
-
-                    final StringBuilder guards = new StringBuilder();
-                    for (int i = 1; i < m.getParameters().size(); i++) {
-                        final String pt = raw(m.getParameters().get(i).asType().toString());
-                        guards.append("                            final Object a").append(i - 1).append(" = w[").append(i - 1).append("];\n")
-                                .append("                            if (a").append(i - 1).append(" != null && !(a").append(i - 1).append(" instanceof ").append(pt).append(")) return;\n");
-                    }
-
-                    w.write("""
-            {
-                final EventConsumer<%1$s> c = new EventConsumer<>() {
-                    final EventWrapper<%1$s> w0 = bus.getWrapper(%1$s.class);
-                    final Object[] w = new Object[%2$d];
-                    @Override public void accept(%1$s e) {
-                        if (w0 == null) return;
-                        w0.wrapInto(e, w);
-%4$s
-                        l.%3$s(e, %5$s);
-                    }
-                    @Override public int getPriority() { return %6$d; }
-                    @Override public Class<%1$s> getEventType() { return %1$s.class; }
-                };
-                tmp.add(c);
-            }
-            """.formatted(evtType, extras, name,
-                            guards.toString(),
-                            args.isEmpty() ? "" : args.toString(),
-                            prio));
-                }
-
-                continue;
-            }
-
-            AnnotationMirror annoOnMethod = null;
-            for (final AnnotationMirror am : m.getAnnotationMirrors()) {
-                if (am.getAnnotationType().asElement().equals(mi.annotation())) { annoOnMethod = am; break; }
-            }
-
-            final List<String> injectTypes = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectTypes");
-            final List<String> injectProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "injectProviders");
-            final List<String> customProviders = (annoOnMethod == null) ? List.of() : extractClassArrayAttr(annoOnMethod, "providers");
-            if (injectTypes.size() != injectProviders.size()) {
-                processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
-                        "injectTypes.length must equal injectProviders.length", m);
-                continue;
-            }
-
-            final Map<String,String> injectMap = new HashMap<>();
-            for (int i = 0; i < injectTypes.size(); i++) {
-                injectMap.put(injectTypes.get(i), injectProviders.get(i));
-            }
-
-            final int paramCount = m.getParameters().size();
-            final int totalExtras = Math.max(0, paramCount - 1);
-            int wrapped = 0;
-            for (int i = 1; i < paramCount; i++) {
-                final String pt = raw(m.getParameters().get(i).asType().toString());
-                if (injectMap.containsKey(pt)) {
-                    break;
-                }
-                wrapped++;
-            }
-
-            final int nonWrapped = totalExtras - wrapped;
-            final List<String> provExpr = new ArrayList<>(nonWrapped);
-            int customIdx = 0;
-            for (int i = 1 + wrapped; i < paramCount; i++) {
-                final String pt = raw(m.getParameters().get(i).asType().toString());
-                final String mapped = injectMap.get(pt);
-                if (mapped != null) {
-                    provExpr.add("new " + mapped + "()");
-                } else {
-                    if (customIdx >= customProviders.size()) {
-                        processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
-                                "Missing ArgProvider for custom parameter type: " + pt, m);
-                        provExpr.clear();
-                        break;
-                    }
-                    provExpr.add("new " + customProviders.get(customIdx++) + "()");
-                }
-            }
-
-            if (provExpr.isEmpty() && nonWrapped > 0) {
-                continue;
-            }
-
-            if (customIdx < customProviders.size()) {
-                processingEnv.getMessager().printMessage(Diagnostic.Kind.ERROR,
-                        "Too many providers specified; " + customProviders.size()
-                                + " provided but only " + customIdx + " used.", m);
-                continue;
-            }
-
-            w.write("{\n");
-            if (nonWrapped == 0) {
-                w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[0];\n");
-            } else {
-                w.write("    final bot.staro.rokit.ArgProvider<" + evtType + ">[] prov = new bot.staro.rokit.ArgProvider[] {\n");
-                for (int i = 0; i < provExpr.size(); i++) {
-                    w.write("        " + provExpr.get(i) + (i + 1 == provExpr.size() ? "\n" : ",\n"));
-                }
-                w.write("    };\n");
-            }
-
-            final String handlerSimple = extractHandler(mi.annotation()).replaceFirst(".+\\.", "");
-            w.write("""
-            final bot.staro.rokit.Invoker<%1$s> inv = new bot.staro.rokit.Invoker<%1$s>() {
-                @Override
-                public void call(final Object listener, final %1$s e, final Object[] wrapped, final Object[] provided) {
-                    final %2$s l0 = (%2$s) listener;
-        """.formatted(evtType, owner));
-
-            if (wrapped > 0) {
-                for (int i = 0; i < wrapped; i++) {
-                    final String pt = raw(m.getParameters().get(1 + i).asType().toString());
-                    w.write("                    final Object w" + i + " = wrapped[" + i + "];\n");
-                    w.write("                    if (w" + i + " != null && !(w" + i + " instanceof " + pt + ")) return;\n");
-                }
-            }
-
-            if (nonWrapped > 0) {
-                for (int i = 0; i < nonWrapped; i++) {
-                    final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
-                    w.write("                    final Object p" + i + " = provided[" + i + "];\n");
-                    w.write("                    if (p" + i + " != null && !(p" + i + " instanceof " + pt + ")) return;\n");
-                }
-            }
-
-            w.write("                    l0." + name + "(e");
-            for (int i = 0; i < wrapped; i++) {
-                final String pt = raw(m.getParameters().get(1 + i).asType().toString());
-                w.write(", (" + pt + ") wrapped[" + i + "]");
-            }
-
-            for (int i = 0; i < nonWrapped; i++) {
-                final String pt = raw(m.getParameters().get(1 + wrapped + i).asType().toString());
-                w.write(", (" + pt + ") provided[" + i + "]");
-            }
-
-            w.write(");\n");
-            w.write("""
-                }
-            };
-            @SuppressWarnings("unchecked")
-            final EventConsumer<%1$s> c = (EventConsumer<%1$s>) new %2$s().createConsumer(bus, l, inv, %3$d, %1$s.class, %4$d, prov);
-            tmp.add(c);
+    private void emitBootstrapAndDispatchers(final Map<String, EventModel> events, final List<String> eventOrder, final Map<String, Integer> eventIds, final LinkedHashMap<String, String> providerDeclTypes, final Map<String, Integer> providerIds) throws IOException {
+        final String fqn = genPkg + "." + BOOTSTRAP;
+        JavaFileObject jfo;
+        try {
+            jfo = filer.createSourceFile(fqn);
+        } catch (final FilerException ignore) {
+            return;
         }
-        """.formatted(evtType, handlerSimple, prio, wrapped));
+
+        try (final Writer w = jfo.openWriter()) {
+            w.write("package " + genPkg + ";\n\n");
+            w.write("import bot.staro.rokit.RokitEventBus;\n");
+            w.write("import bot.staro.rokit.gen.BusState;\n");
+            w.write("import java.util.*;\n");
+            w.write("import java.util.concurrent.ConcurrentHashMap;\n");
+            w.write("public final class " + BOOTSTRAP + " {\n");
+            w.write("    private " + BOOTSTRAP + "() { }\n\n");
+            w.write("    private static final class State implements BusState {\n");
+            w.write("        final ConcurrentHashMap<Object, java.util.List<Runnable>> removals = new ConcurrentHashMap<>();\n");
+            for (final String eventFqn : eventOrder) {
+                final String simple = simpleName(eventFqn);
+                w.write("        final Dispatch_" + simple + ".Store store_" + simple + " = new Dispatch_" + simple + ".Store();\n");
+            }
+
+            w.write("        boolean addRemoval(final Object subscriber, final Runnable r) {\n");
+            w.write("            return removals.compute(subscriber, (k, v) -> {\n");
+            w.write("                if (v == null) { v = new java.util.ArrayList<>(); }\n");
+            w.write("                v.add(r);\n");
+            w.write("                return v;\n");
+            w.write("            }) != null;\n");
+            w.write("        }\n");
+            w.write("        java.util.List<Runnable> takeRemovals(final Object subscriber) { return removals.remove(subscriber); }\n");
+            w.write("        boolean isSubscribed(final Object subscriber) { return removals.containsKey(subscriber); }\n");
+            w.write("    }\n\n");
+
+            w.write("    public static BusState newState() { return new State(); }\n\n");
+
+            w.write("    @SuppressWarnings(\"unchecked\")\n");
+            w.write("    public static <E> void dispatch(final RokitEventBus bus, final BusState bs, final E event) {\n");
+            if (eventOrder.isEmpty()) {
+                w.write("        return;\n");
+            } else {
+                w.write("        final State s = (State) bs;\n");
+                boolean first = true;
+                for (final String fqnEvent : eventOrder) {
+                    final String simple = simpleName(fqnEvent);
+                    w.write("        " + (first ? "if" : "else if") + " (event instanceof " + fqnEvent + ") {\n");
+                    w.write("            Dispatch_" + simple + ".dispatch(bus, s.store_" + simple + ", (" + fqnEvent + ") event);\n");
+                    w.write("            return;\n");
+                    w.write("        }\n");
+                    first = false;
+                }
+
+                w.write("        else { return; }\n");
+            }
+
+            w.write("    }\n\n");
+
+            w.write("    public static void register(final RokitEventBus bus, final BusState bs, final Object subscriber) {\n");
+            w.write("        final State s = (State) bs;\n");
+            final List<String> owners = collectOwners(events);
+            boolean firstOwner = true;
+            for (final String owner : owners) {
+                w.write("        " + (firstOwner ? "if" : "else if") + " (subscriber instanceof " + owner + " listenerInstance) {\n");
+                firstOwner = false;
+                for (final Map.Entry<String, EventModel> eventEntry : events.entrySet()) {
+                    final String eventFqn = eventEntry.getKey();
+                    final String simple = simpleName(eventFqn);
+                    final EventModel em = eventEntry.getValue();
+                    final List<BucketKey> keys = em.orderedBucketKeys();
+
+                    for (final BucketKey bk : keys) {
+                        final List<ListenerModel> listeners = em.buckets.get(bk);
+                        for (final ListenerModel lm : listeners) {
+                            if (!lm.ownerFqn.equals(owner)) {
+                                continue;
+                            }
+
+                            final long sid = stableId(lm.ownerFqn, lm.methodName, lm.eventFqn, lm.signatureKey);
+                            final String dispatcher = "Dispatch_" + simple;
+                            final String invokerInterface = dispatcherInvokerInterfaceName(lm.eventFqn, lm.signatureKey);
+                            final String addMethod = dispatcherAddMethodName(lm.eventFqn, bk, lm.signatureKey);
+                            final String args = buildInvokerArgs(lm.paramPlans);
+                            w.write("            {\n");
+                            w.write("                final " + dispatcher + "." + invokerInterface + " adapter = new " + dispatcher + "." + invokerInterface + "() {\n");
+                            w.write("                    @Override public void invoke(final " + lm.eventFqn + " event" + renderSignatureParams(lm.paramPlans) + ") {\n");
+                            w.write("                        listenerInstance." + lm.methodName + "(event" + args + ");\n");
+                            w.write("                    }\n");
+                            w.write("                };\n");
+                            w.write("                final Runnable removal = " + dispatcher + "." + addMethod + "(bus, s.store_" + simple + ", listenerInstance, " + lm.priority + ", " + sid + "L, adapter);\n");
+                            w.write("                s.addRemoval(subscriber, removal);\n");
+                            w.write("            }\n");
+                        }
+                    }
+                }
+
+                w.write("        }\n");
+            }
+            if (!owners.isEmpty()) {
+                w.write("        else { }\n");
+            }
+            w.write("    }\n\n");
+
+            w.write("    public static void unregister(final RokitEventBus bus, final BusState bs, final Object subscriber) {\n");
+            w.write("        final State s = (State) bs;\n");
+            w.write("        final java.util.List<Runnable> list = s.takeRemovals(subscriber);\n");
+            w.write("        if (list == null) { return; }\n");
+            w.write("        for (int i = 0; i < list.size(); i++) { list.get(i).run(); }\n");
+            w.write("    }\n\n");
+
+            w.write("    public static boolean isSubscribed(final BusState bs, final Object subscriber) {\n");
+            w.write("        final State s = (State) bs;\n");
+            w.write("        return s.isSubscribed(subscriber);\n");
+            w.write("    }\n\n");
+
+            for (final String eventFqn : eventOrder) {
+                final EventModel em = events.get(eventFqn);
+                emitEventDispatcher(w, em, providerDeclTypes, providerIds);
+            }
+
+            w.write("}\n");
+        }
+    }
+
+
+
+    private void emitEventDispatcher(final Writer w,
+                                     final EventModel em,
+                                     final LinkedHashMap<String, String> providerDeclTypes,
+                                     final Map<String, Integer> providerIds) throws IOException {
+        final String simple = simpleName(em.eventFqn);
+        final String className = "Dispatch_" + simple;
+        w.write("    static final class " + className + " {\n");
+        w.write("        static final class Store { \n");
+
+        final List<BucketKey> keys = em.orderedBucketKeys();
+        for (final BucketKey key : keys) {
+            final String sig = key.signatureKey;
+            final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
+            final String baseName = bucketFieldBase(simple, key);
+            w.write("            volatile " + iface + "[] " + baseName + " = null;\n");
+            w.write("            volatile int[] " + baseName + "_P = null;\n");
+            w.write("            volatile long[] " + baseName + "_I = null;\n");
+        }
+
+        w.write("        }\n\n");
+
+        final List<String> signatures = new ArrayList<>(em.signatures);
+        Collections.sort(signatures);
+        for (final String sig : signatures) {
+            final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
+            w.write("        interface " + iface + " { void invoke(final " + em.eventFqn + " event" + renderSignatureParamDecls(sig) + "); }\n");
+        }
+
+        w.write("\n");
+
+        for (final BucketKey key : keys) {
+            final String sig = key.signatureKey;
+            final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
+            final String baseName = bucketFieldBase(simple, key);
+            final String addName = dispatcherAddMethodName(em.eventFqn, key, sig);
+            final String removeName = dispatcherRemoveMethodName(em.eventFqn, key, sig);
+
+            w.write("        static Runnable " + addName + "(final RokitEventBus bus, final Store store, final Object subscriber, final int priority, final long id, final " + iface + " inv) {\n");
+            w.write("            synchronized (store) {\n");
+            w.write("                final " + iface + "[] prev = store." + baseName + ";\n");
+            w.write("                final int[] prevP = store." + baseName + "_P;\n");
+            w.write("                final long[] prevI = store." + baseName + "_I;\n");
+            w.write("                final int n = prev == null ? 0 : prev.length;\n");
+            w.write("                if (n != 0) {\n");
+            w.write("                    for (int i = 0; i < n; i++) {\n");
+            w.write("                        if (prevI[i] == id) {\n");
+            w.write("                            return new Runnable() { @Override public void run() { } };\n");
+            w.write("                        }\n");
+            w.write("                    }\n");
+            w.write("                }\n");
+            w.write("                final int pos = findInsertPos(prevP, n, priority);\n");
+            w.write("                final " + iface + "[] next = new " + iface + "[n + 1];\n");
+            w.write("                final int[] nextP = new int[n + 1];\n");
+            w.write("                final long[] nextI = new long[n + 1];\n");
+            w.write("                if (n != 0) {\n");
+            w.write("                    System.arraycopy(prev, 0, next, 0, pos);\n");
+            w.write("                    System.arraycopy(prevP, 0, nextP, 0, pos);\n");
+            w.write("                    System.arraycopy(prevI, 0, nextI, 0, pos);\n");
+            w.write("                    System.arraycopy(prev, pos, next, pos + 1, n - pos);\n");
+            w.write("                    System.arraycopy(prevP, pos, nextP, pos + 1, n - pos);\n");
+            w.write("                    System.arraycopy(prevI, pos, nextI, pos + 1, n - pos);\n");
+            w.write("                }\n");
+            w.write("                next[pos] = inv;\n");
+            w.write("                nextP[pos] = priority;\n");
+            w.write("                nextI[pos] = id;\n");
+            w.write("                store." + baseName + " = next;\n");
+            w.write("                store." + baseName + "_P = nextP;\n");
+            w.write("                store." + baseName + "_I = nextI;\n");
+            w.write("            }\n");
+            w.write("            return new Runnable() { @Override public void run() { " + removeName + "(store, inv); } };\n");
+            w.write("        }\n");
+
+            w.write("        static void " + removeName + "(final Store store, final " + iface + " inv) {\n");
+            w.write("            synchronized (store) {\n");
+            w.write("                final " + iface + "[] prev = store." + baseName + ";\n");
+            w.write("                final int[] prevP = store." + baseName + "_P;\n");
+            w.write("                final long[] prevI = store." + baseName + "_I;\n");
+            w.write("                if (prev == null) { return; }\n");
+            w.write("                final int n = prev.length;\n");
+            w.write("                int idx = -1;\n");
+            w.write("                for (int i = 0; i < n; i++) { if (prev[i] == inv) { idx = i; break; } }\n");
+            w.write("                if (idx < 0) { return; }\n");
+            w.write("                if (n == 1) { store." + baseName + " = null; store." + baseName + "_P = null; store." + baseName + "_I = null; return; }\n");
+            w.write("                final " + iface + "[] next = new " + iface + "[n - 1];\n");
+            w.write("                final int[] nextP = new int[n - 1];\n");
+            w.write("                final long[] nextI = new long[n - 1];\n");
+            w.write("                System.arraycopy(prev, 0, next, 0, idx);\n");
+            w.write("                System.arraycopy(prevP, 0, nextP, 0, idx);\n");
+            w.write("                System.arraycopy(prevI, 0, nextI, 0, idx);\n");
+            w.write("                System.arraycopy(prev, idx + 1, next, idx, n - idx - 1);\n");
+            w.write("                System.arraycopy(prevP, idx + 1, nextP, idx, n - idx - 1);\n");
+            w.write("                System.arraycopy(prevI, idx + 1, nextI, idx, n - idx - 1);\n");
+            w.write("                store." + baseName + " = next;\n");
+            w.write("                store." + baseName + "_P = nextP;\n");
+            w.write("                store." + baseName + "_I = nextI;\n");
+            w.write("            }\n");
+            w.write("        }\n\n");
+        }
+
+        w.write("        private static int findInsertPos(final int[] priorities, final int n, final int p) {\n");
+        w.write("            if (n == 0 || priorities == null) return 0;\n");
+        w.write("            int lo = 0, hi = n;\n");
+        w.write("            while (lo < hi) {\n");
+        w.write("                final int mid = (lo + hi) >>> 1;\n");
+        w.write("                final int mp = priorities[mid];\n");
+        w.write("                if (mp > p) lo = mid + 1; else hi = mid;\n");
+        w.write("            }\n");
+        w.write("            return lo;\n");
+        w.write("        }\n\n");
+
+        w.write("        static void dispatch(final RokitEventBus bus, final Store store, final " + em.eventFqn + " event) {\n");
+
+        final Map<String, List<BucketKey>> byCond = new LinkedHashMap<>();
+        for (final BucketKey bk : keys) {
+            byCond.computeIfAbsent(bk.conditionKey, k -> new ArrayList<>()).add(bk);
+        }
+
+        for (final Map.Entry<String, List<BucketKey>> entry : byCond.entrySet()) {
+            final String condKey = entry.getKey();
+            final List<BucketKey> group = entry.getValue();
+
+            final Set<String> guardsInGroup = new LinkedHashSet<>();
+            final Set<String> localsInGroup = new LinkedHashSet<>();
+            for (final BucketKey bk : group) {
+                final int gi = bk.conditionKey.indexOf("G:");
+                final int xi = bk.conditionKey.indexOf(";X:");
+                final String guardsCsv = gi >= 0 && xi > gi ? bk.conditionKey.substring(gi + 2, xi) : "";
+                final String extsCsv = xi >= 0 ? bk.conditionKey.substring(xi + 3) : "";
+                if (!guardsCsv.isEmpty()) {
+                    for (final String g : guardsCsv.split(",")) {
+                        if (!g.isEmpty()) {
+                            guardsInGroup.add(g);
+                        }
+                    }
+                }
+                if (!extsCsv.isEmpty()) {
+                    for (final String x : extsCsv.split(",")) {
+                        if (!x.isEmpty()) {
+                            localsInGroup.add(x);
+                        }
+                    }
+                }
+            }
+
+            for (final String g : guardsInGroup) {
+                final String type = em.guardDeclaredTypes.get(g);
+                final String constName = sanitizeUpper(g);
+                w.write("            final " + type + " " + sanitizeLower(g) + " = " + genPkg + ".ProviderKeys." + constName + " >= 0 ? bus.<" + type + ">getProvider(" + genPkg + ".ProviderKeys." + constName + ") : null;\n");
+            }
+
+            for (final String local : localsInGroup) {
+                final ExtractorModel ex = em.extractors.get(local);
+                if (ex != null) {
+                    w.write("            final " + ex.declaredType + " " + ex.localName + " = " + ex.initExpression + ";\n");
+                }
+            }
+
+            final String condExpr = renderCondition(new BucketKey(condKey, ""), em.guardDeclaredTypes.keySet(), em.extractors.keySet());
+            w.write("            " + (condExpr.isEmpty() ? "" : "if (" + condExpr + ") ") + "{\n");
+
+            for (final BucketKey bk : group) {
+                final String sig = bk.signatureKey;
+                final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
+                final String baseName = bucketFieldBase(simple, bk);
+                w.write("                {\n");
+                w.write("                    final " + iface + "[] local = store." + baseName + ";\n");
+                w.write("                    if (local != null) {\n");
+                w.write("                        for (int index = 0; index < local.length; index++) {\n");
+                w.write("                            local[index].invoke(event" + renderSignatureArgs(sig) + ");\n");
+                w.write("                        }\n");
+                w.write("                    }\n");
+                w.write("                }\n");
+            }
+
+            w.write("            }\n");
         }
 
         w.write("        }\n");
+        w.write("    }\n");
+    }
+
+    private static String dispatcherInvokerInterfaceName(final String eventFqn, final String signatureKey) {
+        final String simple = simpleName(eventFqn);
+        if (signatureKey.isEmpty()) {
+            return "Invoker_" + simple + "__";
+        }
+        return "Invoker_" + simple + "__" + signatureKey.replace('.', '_').replace('|', '_').replace('$', '_');
+    }
+
+    private static String dispatcherAddMethodName(final String eventFqn, final BucketKey key, final String sig) {
+        final String simple = simpleName(eventFqn);
+        return "add_" + simple + "_" + hashKey(key) + "_" + sigHash(sig);
+    }
+
+    private static String dispatcherRemoveMethodName(final String eventFqn, final BucketKey key, final String sig) {
+        final String simple = simpleName(eventFqn);
+        return "remove_" + simple + "_" + hashKey(key) + "_" + sigHash(sig);
+    }
+
+    private static String bucketFieldBase(final String simpleEvent, final BucketKey key) {
+        return "BUCKET_" + simpleEvent + "_" + hashKey(key);
+    }
+
+    private static String hashKey(final BucketKey key) {
+        return Long.toHexString(fnv1a(key.conditionKey + "|" + key.signatureKey));
+    }
+
+    private static String sigHash(final String sig) {
+        return Long.toHexString(fnv1a(sig));
+    }
+
+    private static long fnv1a(final String s) {
+        long h = 0xcbf29ce484222325L;
+        for (int i = 0; i < s.length(); i++) {
+            h ^= s.charAt(i);
+            h *= 0x100000001b3L;
+        }
+
+        return h;
+    }
+
+    private static String renderSignatureParamDecls(final String signatureKey) {
+        if (signatureKey.isEmpty()) {
+            return "";
+        }
+
+        final StringBuilder sb = new StringBuilder();
+        final Map<String, Integer> seen = new HashMap<>();
+        for (final String p : signatureKey.split("\\|")) {
+            final String base = sanitizeLower(simpleName(p));
+            final int c = seen.getOrDefault(base, 0);
+            seen.put(base, c + 1);
+            final String name = (c == 0) ? base : (base + c);
+            sb.append(", ").append(p).append(' ').append(name);
+        }
+
+        return sb.toString();
     }
 
 
-    private String extractHandler(final TypeElement annotation) {
-        final TypeElement marker = elements.getTypeElement("bot.staro.rokit.ListenerAnnotation");
-        for (final AnnotationMirror am : annotation.getAnnotationMirrors()) {
-            if (am.getAnnotationType().asElement().equals(marker)) {
-                for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
-                    if ("handler".contentEquals(ev.getKey().getSimpleName())) {
-                        return ev.getValue().getValue().toString();
-                    }
+    private static String renderSignatureParams(final List<ParamPlan> plans) {
+        if (plans.isEmpty()) {
+            return "";
+        }
+
+        final StringBuilder sb = new StringBuilder();
+        for (final ParamPlan p : plans) {
+            sb.append(", ").append(p.declaredType).append(" ").append(paramVarName(p));
+        }
+
+        return sb.toString();
+    }
+
+    private static String renderSignatureArgs(final String sig) {
+        if (sig.isEmpty()) {
+            return "";
+        }
+
+        final StringBuilder sb = new StringBuilder();
+        final Map<String, Integer> seen = new HashMap<>();
+        for (final String p : sig.split("\\|")) {
+            final String base = sanitizeLower(simpleName(p));
+            final int c = seen.getOrDefault(base, 0);
+            seen.put(base, c + 1);
+            final String name = (c == 0) ? base : (base + c);
+            sb.append(", ").append(name);
+        }
+
+        return sb.toString();
+    }
+
+
+    private static String buildInvokerArgs(final List<ParamPlan> plans) {
+        if (plans.isEmpty()) {
+            return "";
+        }
+
+        final StringBuilder sb = new StringBuilder();
+        for (final ParamPlan p : plans) {
+            sb.append(", ").append(p.argExpr);
+        }
+
+        return sb.toString();
+    }
+
+    private static String renderCondition(final BucketKey key, final Set<String> allGuards, final Set<String> allExtractors) {
+        final int gi = key.conditionKey.indexOf("G:");
+        final int xi = key.conditionKey.indexOf(";X:");
+        final String guards = gi >= 0 && xi > gi ? key.conditionKey.substring(gi + 2, xi) : "";
+        final String exts = xi >= 0 ? key.conditionKey.substring(xi + 3) : "";
+        final List<String> terms = new ArrayList<>();
+        if (!guards.isEmpty()) {
+            for (final String g : guards.split(",")) {
+                if (!g.isEmpty()) {
+                    terms.add(sanitizeLower(g) + " != null");
                 }
             }
         }
-        return "bot.staro.rokit.impl.DefaultListenerHandler";
+
+        if (!exts.isEmpty()) {
+            for (final String x : exts.split(",")) {
+                if (!x.isEmpty()) {
+                    terms.add(x + " != null");
+                }
+            }
+        }
+
+        return String.join(" && ", terms);
     }
+
+    private static String paramVarName(final ParamPlan p) {
+        final String expr = p.argExpr.trim();
+        if (expr.matches("[a-zA-Z_][a-zA-Z0-9_]*")) {
+            return expr;
+        }
+
+        return sanitizeLower(simpleName(p.declaredType));
+    }
+
+    private static String simpleName(final String fqn) {
+        final int idx = fqn.lastIndexOf('.');
+        return idx < 0 ? fqn : fqn.substring(idx + 1);
+    }
+
+    private static String raw(final String fqn) {
+        final int idx = fqn.indexOf('<');
+        return idx < 0 ? fqn : fqn.substring(0, idx);
+    }
+
+    private static String sanitizeUpper(final String name) {
+        final String s = name.replaceAll("[^A-Za-z0-9]+", "_");
+        return s.toUpperCase(Locale.ROOT);
+    }
+
+    private static String sanitizeLower(final String name) {
+        final String s = name.replaceAll("[^A-Za-z0-9]+", "_");
+        return Character.toLowerCase(s.charAt(0)) + s.substring(1);
+    }
+
+    private static String nonNull(final String value, final String label) {
+        if (value == null) {
+            throw new IllegalStateException(label + " is null");
+        }
+
+        return value;
+    }
+
+    private void error(final Element where, final String format, final Object... args) {
+        final String msg = String.format(Locale.ROOT, format, args);
+        if (where != null) {
+            messager.printMessage(Diagnostic.Kind.ERROR, msg, where);
+        } else {
+            messager.printMessage(Diagnostic.Kind.ERROR, msg);
+        }
+
+        hadError = true;
+    }
+
 
     private static int extractPriority(final ExecutableElement element, final TypeElement annotation) {
         for (final AnnotationMirror am : element.getAnnotationMirrors()) {
@@ -381,64 +768,83 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
             }
         }
+
         return 0;
     }
 
-    private List<String> extractClassArrayAttr(final AnnotationMirror am, final String name) {
-        for (final var ev : elements.getElementValuesWithDefaults(am).entrySet()) {
-            if (!name.contentEquals(ev.getKey().getSimpleName())) {
-                continue;
-            }
-
-            final Object v = ev.getValue().getValue();
-            final List<String> out = new ArrayList<>();
-            if (v instanceof List<?> list) {
-                for (Object o : list) {
-                    if (o instanceof AnnotationValue av) {
-                        final Object vv = av.getValue();
-                        if (vv instanceof TypeMirror tm) {
-                            out.add(stripClassSuffix(tm.toString()));
-                        } else if (vv != null) {
-                            out.add(stripClassSuffix(vv.toString()));
-                        }
-                    }
-                }
-
-                return out;
-            }
-
-            if (v instanceof TypeMirror tm) {
-                out.add(stripClassSuffix(tm.toString()));
-                return out;
-            }
-
-            final String s = String.valueOf(v);
-            if (s.startsWith("[") && s.endsWith("]")) {
-                final String body = s.substring(1, s.length() - 1).trim();
-                if (!body.isEmpty()) {
-                    for (final String e : body.split(",")) {
-                        out.add(stripClassSuffix(e.trim()));
-                    }
-                }
-            } else if (!s.isEmpty()) {
-                out.add(stripClassSuffix(s.trim()));
-            }
-
-            return out;
+    private static long stableId(final String ownerFqn, final String methodName, final String eventFqn, final String signatureKey) {
+        final String s = ownerFqn + "#" + methodName + "(" + eventFqn + "|" + signatureKey + ")";
+        long h = 0xcbf29ce484222325L;
+        for (int i = 0; i < s.length(); i++) {
+            h ^= s.charAt(i);
+            h *= 0x100000001b3L;
         }
 
-        return List.of();
+        return h;
     }
 
-    private static String stripClassSuffix(final String s) {
-        return s.endsWith(".class") ? s.substring(0, s.length() - 6) : s;
-    }
+    private static List<String> collectOwners(final Map<String, EventModel> events) {
+        final LinkedHashSet<String> owners = new LinkedHashSet<>();
+        for (final EventModel em : events.values()) {
+            for (final List<ListenerModel> list : em.buckets.values()) {
+                for (final ListenerModel lm : list) {
+                    owners.add(lm.ownerFqn);
+                }
+            }
+        }
 
-    private static String raw(final String fqn) {
-        final int idx = fqn.indexOf('<');
-        return idx < 0 ? fqn : fqn.substring(0, idx);
+        return new ArrayList<>(owners);
     }
 
     private record MethodInfo(TypeElement annotation, ExecutableElement method) {}
+
+    private record ParamPlan(int extraIndex, String declaredType, String patternKey, Set<String> guardBits, Set<ParamBinder.Extractor> extractors, String argExpr) {}
+
+    private record ListenerModel(String ownerFqn, String methodName, int priority, String eventFqn, String signatureKey, List<ParamPlan> paramPlans) {}
+
+    private record ExtractorModel(String localName, String declaredType, String initExpression) {}
+
+    private record BucketKey(String conditionKey, String signatureKey) {}
+
+    private static final class EventModel {
+        final String eventFqn;
+        final Map<String, String> guardDeclaredTypes = new LinkedHashMap<>();
+        final Map<String, ExtractorModel> extractors = new LinkedHashMap<>();
+        final Set<String> signatures = new LinkedHashSet<>();
+        final Map<BucketKey, List<ListenerModel>> buckets = new LinkedHashMap<>();
+
+        EventModel(final String eventFqn) {
+            this.eventFqn = eventFqn;
+        }
+
+        void registerGuard(final String name, final String declaredType) {
+            final String prev = guardDeclaredTypes.putIfAbsent(name, declaredType);
+            if (prev != null && !prev.equals(declaredType)) {
+                throw new IllegalStateException("Guard " + name + " has conflicting types: " + prev + " vs " + declaredType);
+            }
+        }
+
+        void registerExtractor(final String localName, final String declaredType, final String initExpr) {
+            final ExtractorModel prev = extractors.putIfAbsent(localName, new ExtractorModel(localName, declaredType, initExpr));
+            if (prev != null) {
+                if (!prev.declaredType.equals(declaredType) || !prev.initExpression.equals(initExpr)) {
+                    throw new IllegalStateException("Extractor " + localName + " mismatch.");
+                }
+            }
+        }
+
+        void addListener(final String conditionKey, final String signatureKey, final ListenerModel lm) {
+            signatures.add(signatureKey);
+            final BucketKey key = new BucketKey(conditionKey, signatureKey);
+            buckets.computeIfAbsent(key, k -> new ArrayList<>()).add(lm);
+            buckets.get(key).sort((a, b) -> Integer.compare(b.priority, a.priority));
+        }
+
+        List<BucketKey> orderedBucketKeys() {
+            final List<BucketKey> out = new ArrayList<>(buckets.keySet());
+            out.sort(Comparator.comparing((BucketKey k) -> k.signatureKey).thenComparing(k -> k.conditionKey));
+            return out;
+        }
+    }
 
 }

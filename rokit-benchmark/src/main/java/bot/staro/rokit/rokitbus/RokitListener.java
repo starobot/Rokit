@@ -82,5 +82,4 @@ public final class RokitListener {
     public void onEvent(NEvent event) {
     }
 
-
 }

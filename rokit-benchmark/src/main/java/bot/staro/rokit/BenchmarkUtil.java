@@ -18,7 +18,7 @@ public final class BenchmarkUtil {
         }
     }
 
-    public static long measurePureDispatch(Consumer<Event> eventConsumer, Event event) {
+    public static long measurePureDispatch(Consumer<Object> eventConsumer, Object event) {
         long start = System.nanoTime();
         for (int i = 0; i < EVENTS_PER_TEST; i++) {
             eventConsumer.accept(event);

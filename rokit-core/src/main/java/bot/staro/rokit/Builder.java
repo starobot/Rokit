@@ -1,23 +1,23 @@
 package bot.staro.rokit;
 
-import java.util.IdentityHashMap;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Supplier;
 
 public final class Builder {
-    private final Map<Class<?>, EventWrapper<?>> wrappers = new IdentityHashMap<>();
+    private final List<Object> providers = new ArrayList<>();
 
-    public <T> Builder wrap(final Class<T> eventType, final EventWrapper<T> wrapper) {
-        wrappers.put(eventType, wrapper);
+    public <T> Builder withProvider(final int providerId, final Supplier<T> supplier) {
+        while (providers.size() < providerId + 1) {
+            providers.add(null);
+        }
+
+        providers.set(providerId, supplier);
         return this;
     }
 
-    public <T> Builder wrap(final Class<T> eventType, final SingleEventWrapper<T> wrapper) {
-        wrappers.put(eventType, wrapper);
-        return this;
-    }
-
-    public RokitEventBus build() {
-        return new RokitEventBus(Map.copyOf(wrappers));
+    public EventBus build() {
+        return new RokitEventBus(providers.toArray());
     }
 
 }

@@ -3,26 +3,16 @@ plugins {
 }
 
 group = 'bot.staro.rokit'
-version = '2.0.0'
+version = '3.0.0'
 
 repositories {
     mavenCentral()
-    maven {
-        name = "meteor-maven"
-        url = "https://maven.meteordev.org/releases"
-    }
-    maven {
-        name = 'impactdevelopment-repo'
-        url = 'https://impactdevelopment.github.io/maven/'
-    }
 }
 
 dependencies {
     implementation project(':rokit-api')
     implementation project(':rokit-core')
     annotationProcessor project(':rokit-processor')
-    implementation "meteordevelopment:orbit:0.2.3"
-    implementation("com.google.guava:guava:33.4.8-jre")
 }
 
 test {

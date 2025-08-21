@@ -1,5 +1,2 @@
 rootProject.name = 'rokit'
-include 'rokit-core', 'rokit-processor'
-include 'rokit-api'
-include 'rokit-benchmark'
-
+include 'rokit-api', 'rokit-core', 'rokit-processor', 'rokit-benchmark', 'rokit-processor-spi'
