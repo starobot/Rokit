@@ -1,5 +1,6 @@
 package bot.staro.rokit.processor;
 
+import bot.staro.rokit.processor.binders.GenericPayloadBinder;
 import bot.staro.rokit.spi.ParamBinder;
 import bot.staro.rokit.spi.ProviderAwareBinder;
 import com.google.auto.service.AutoService;
@@ -44,7 +45,11 @@ public final class EventListenerProcessor extends AbstractProcessor {
         }
 
         this.paramBinders = new ArrayList<>();
-        this.paramBinders.add(new bot.staro.rokit.processor.binders.GenericPayloadBinder());
+        for (var b : ServiceLoader.load(ParamBinder.class, getClass().getClassLoader())) {
+            this.paramBinders.add(b);
+        }
+
+        this.paramBinders.add(new GenericPayloadBinder());
     }
 
     @Override
