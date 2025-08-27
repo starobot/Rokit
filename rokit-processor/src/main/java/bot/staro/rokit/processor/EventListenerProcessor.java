@@ -1,6 +1,7 @@
 package bot.staro.rokit.processor;
 
 import bot.staro.rokit.processor.binders.GenericPayloadBinder;
+import bot.staro.rokit.spi.ContextualParamBinder;
 import bot.staro.rokit.spi.ParamBinder;
 import bot.staro.rokit.spi.ProviderAwareBinder;
 import com.google.auto.service.AutoService;
@@ -112,6 +113,11 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 final String methodName = method.getSimpleName().toString();
                 final int priority = extractPriority(method, mi.annotation);
 
+                final TypeElement contextualListenerMeta = elements.getTypeElement("bot.staro.rokit.ContextualListener");
+                final boolean isContextualListener = mi.annotation.getAnnotationMirrors()
+                        .stream()
+                        .anyMatch(mirror -> mirror.getAnnotationType().asElement().equals(contextualListenerMeta));
+
                 final List<ParamPlan> paramPlans = new ArrayList<>();
                 final List<String> signatureTypes = new ArrayList<>();
 
@@ -143,7 +149,15 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         continue;
                     }
 
-                    final Set<String> guardBits = new TreeSet<>(binding.guardBits());
+                    final Set<String> guardBits = new TreeSet<>();
+                    if (isContextualListener && usedBinder instanceof ContextualParamBinder) {
+                        final Map<String, String> providers = ((ContextualParamBinder) usedBinder).requiredProviders(method, param, processingEnv);
+                        if (providers != null) {
+                            guardBits.addAll(providers.keySet());
+                        }
+                    } else {
+                        guardBits.addAll(binding.guardBits());
+                    }
 
                     Map<String,String> requiredProviders = Collections.emptyMap();
                     if (usedBinder instanceof ProviderAwareBinder paw) {
