@@ -8,6 +8,7 @@ import com.google.auto.service.AutoService;
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
+import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
@@ -25,9 +26,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
     private static final String GEN_PKG = "bot.staro.rokit.generated";
     private static final String BOOTSTRAP = "GeneratedBootstrap";
     private static final String[] PAYLOAD_ACCESSOR_CANDIDATES = new String[] {
-            "packet", "getPacket", "getPayload", "getObject", "payload", "get",
-            "value", "getValue", "object", "data", "setting", "getSetting", "screen", "getScreen",
-            "module", "getModule"
+            "getPacket", "getPayload", "getObject", "payload", "get", "value", "getValue", "object", "data", "setting", "screen"
     };
 
     private Elements elements;
@@ -658,7 +657,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
     private ExecutableElement findPayloadAccessor(final TypeElement eventElement) {
         if (eventElement.getKind() == ElementKind.RECORD) {
             for (RecordComponentElement component : eventElement.getRecordComponents()) {
-                if (component.asType().getKind() == TypeKind.TYPEVAR) {
+                if (isOrContainsTypeVar(component.asType())) {
                     return component.getAccessor();
                 }
             }
@@ -671,21 +670,29 @@ public final class EventListenerProcessor extends AbstractProcessor {
             if (!isCandidateName(accessor.getSimpleName().toString()) || !accessor.getModifiers().contains(Modifier.PUBLIC) || !accessor.getParameters().isEmpty()) {
                 continue;
             }
-            if (accessor.getReturnType().getKind() == TypeKind.TYPEVAR) {
+            if (isOrContainsTypeVar(accessor.getReturnType())) {
                 return accessor;
             }
         }
         return null;
     }
 
+    private boolean isOrContainsTypeVar(javax.lang.model.type.TypeMirror type) {
+        if (type.getKind() == TypeKind.TYPEVAR) {
+            return true;
+        }
+        if (type instanceof DeclaredType) {
+            for (javax.lang.model.type.TypeMirror typeArgument : ((DeclaredType) type).getTypeArguments()) {
+                if (isOrContainsTypeVar(typeArgument)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static String sanitizeFqn(final String fqn) {
-        return fqn.replace('.', '_')
-                .replace('$', '_')
-                .replace('<', '_')
-                .replace('>', '_')
-                .replace(',', '_')
-                .replace('?', 'W')
-                .replace(' ', '_');
+        return fqn.replaceAll("[^A-Za-z0-9_.]", "_").replace('.', '_');
     }
 
     private static String dispatcherClassName(final String eventFqn) {
@@ -936,7 +943,11 @@ public final class EventListenerProcessor extends AbstractProcessor {
             final int start = eventFqn.indexOf('<');
             final int end = eventFqn.lastIndexOf('>');
             if (start >= 0 && end > start) {
-                return eventFqn.substring(start + 1, end);
+                String arg = eventFqn.substring(start + 1, end);
+                if (arg.equals("?")) {
+                    return "java.lang.Object";
+                }
+                return arg;
             }
             return "java.lang.Object";
         }
