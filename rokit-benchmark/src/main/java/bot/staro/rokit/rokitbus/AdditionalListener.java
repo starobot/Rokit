@@ -8,4 +8,5 @@ public final class AdditionalListener {
     public void onEvent(SingletonEvent ignored) {
         System.out.println("priority 0");
     }
+
 }

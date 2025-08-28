@@ -233,7 +233,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         priority,
                         eventFqn,
                         signatureKey,
-                        paramPlans
+                        paramPlans,
+                        conditionKey
                 );
 
                 event.addListener(conditionKey, signatureKey, lm);
@@ -578,15 +579,17 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
         w.write("        static void dispatch(final RokitEventBus bus, final Store store, final " + raw(em.eventFqn) + " event) {\n");
 
+        List<ListenerModel> allListeners = new ArrayList<>();
+        em.buckets.values().forEach(allListeners::addAll);
+        allListeners.sort(Comparator.comparingInt(ListenerModel::priority).reversed());
+
         final Set<String> allGuardsForEvent = new LinkedHashSet<>();
         final Set<String> allExtractorsForEvent = new LinkedHashSet<>();
-        for (final List<ListenerModel> bucket : em.buckets.values()) {
-            for (final ListenerModel listener : bucket) {
-                for (final ParamPlan plan : listener.paramPlans) {
-                    allGuardsForEvent.addAll(plan.guardBits);
-                    for (final ParamBinder.Extractor ex : plan.extractors) {
-                        allExtractorsForEvent.add(ex.localName());
-                    }
+        for (final ListenerModel listener : allListeners) {
+            for (final ParamPlan plan : listener.paramPlans) {
+                allGuardsForEvent.addAll(plan.guardBits);
+                for (final ParamBinder.Extractor ex : plan.extractors) {
+                    allExtractorsForEvent.add(ex.localName());
                 }
             }
         }
@@ -603,47 +606,26 @@ public final class EventListenerProcessor extends AbstractProcessor {
             }
         }
 
-        final Map<String, List<BucketKey>> byCond = new LinkedHashMap<>();
-        for (final BucketKey bk : keys) {
-            byCond.computeIfAbsent(bk.conditionKey, k -> new ArrayList<>()).add(bk);
-        }
+        for (final ListenerModel listener : allListeners) {
+            final BucketKey bk = new BucketKey(listener.conditionKey, listener.signatureKey);
+            final String condExpr = renderCondition(bk, em.guardDeclaredTypes.keySet(), em.extractors.keySet());
 
-        List<Map.Entry<String, List<BucketKey>>> sortedEntries = new ArrayList<>(byCond.entrySet());
-        sortedEntries.sort((e1, e2) -> {
-            int maxPriority1 = e1.getValue().stream()
-                    .flatMap(bk -> em.buckets.get(bk).stream())
-                    .mapToInt(ListenerModel::priority)
-                    .max().orElse(Integer.MIN_VALUE);
-            int maxPriority2 = e2.getValue().stream()
-                    .flatMap(bk -> em.buckets.get(bk).stream())
-                    .mapToInt(ListenerModel::priority)
-                    .max().orElse(Integer.MIN_VALUE);
-            return Integer.compare(maxPriority2, maxPriority1);
-        });
-
-        for (final Map.Entry<String, List<BucketKey>> entry : sortedEntries) {
-            final String condKey = entry.getKey();
-            final List<BucketKey> group = entry.getValue();
-
-            final String condExpr = renderCondition(new BucketKey(condKey, ""), em.guardDeclaredTypes.keySet(), em.extractors.keySet());
             w.write("            " + (condExpr.isEmpty() ? "" : "if (" + condExpr + ") ") + "{\n");
 
-            for (final BucketKey bk : group) {
-                final String sig = bk.signatureKey;
-                final ListenerModel representative = em.buckets.get(bk).getFirst();
-                final String invokeArgs = buildInvokerArgs(representative.paramPlans);
-                final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
-                final String baseName = bucketFieldBase(em.eventFqn, bk);
-                w.write("                {\n");
-                w.write("                    final " + iface + "[] local = store." + baseName + ";\n");
-                w.write("                    if (local != null) {\n");
-                w.write("                        for (int index = 0; index < local.length; index++) {\n");
-                w.write("                            local[index].invoke(event" + invokeArgs + ");\n");
-                w.write("                        }\n");
-                w.write("                    }\n");
-                w.write("                }\n");
-            }
+            final String invokeArgs = buildInvokerArgs(listener.paramPlans);
+            final String iface = dispatcherInvokerInterfaceName(em.eventFqn, listener.signatureKey);
+            final String baseName = bucketFieldBase(em.eventFqn, bk);
 
+            w.write("                {\n");
+            w.write("                    final " + iface + "[] local = store." + baseName + ";\n");
+            w.write("                    if (local != null) {\n");
+            w.write("                        for (int index = 0; index < local.length; index++) {\n");
+            w.write("                             if (local[index] != null && store." + baseName + "_I[index] == " + stableId(listener.ownerFqn, listener.methodName, listener.eventFqn, listener.signatureKey) + "L) {\n");
+            w.write("                                 local[index].invoke(event" + invokeArgs + ");\n");
+            w.write("                             }\n");
+            w.write("                        }\n");
+            w.write("                    }\n");
+            w.write("                }\n");
             w.write("            }\n");
         }
 
@@ -903,7 +885,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
     private record ParamPlan(int extraIndex, String declaredType, String patternKey, Set<String> guardBits, Set<ParamBinder.Extractor> extractors, String argExpr) {}
 
-    private record ListenerModel(String ownerFqn, String methodName, int priority, String eventFqn, String signatureKey, List<ParamPlan> paramPlans) {}
+    private record ListenerModel(String ownerFqn, String methodName, int priority, String eventFqn, String signatureKey, List<ParamPlan> paramPlans, String conditionKey) {}
 
     private record ExtractorModel(String localName, String declaredType, String initExpression) {}
 
