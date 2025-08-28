@@ -703,24 +703,19 @@ public final class EventListenerProcessor extends AbstractProcessor {
     }
 
     private static String dispatcherInvokerInterfaceName(final String eventFqn, final String signatureKey) {
-        final String sanitizedFqn = sanitizeFqn(eventFqn);
-        if (signatureKey.isEmpty()) {
-            return "Invoker_" + sanitizedFqn + "__";
-        }
-
-        return "Invoker_" + sanitizedFqn + "__" + signatureKey.replace('.', '_').replace('|', '_').replace('$', '_');
+        return "Invoker_" + Long.toHexString(fnv1a(eventFqn + "##" + signatureKey));
     }
 
     private static String dispatcherAddMethodName(final String eventFqn, final BucketKey key, final String sig) {
-        return "add_" + sanitizeFqn(eventFqn) + "_" + hashKey(key) + "_" + sigHash(sig);
+        return "add_" + Long.toHexString(fnv1a(eventFqn + "##" + key.toString() + "##" + sig));
     }
 
     private static String dispatcherRemoveMethodName(final String eventFqn, final BucketKey key, final String sig) {
-        return "remove_" + sanitizeFqn(eventFqn) + "_" + hashKey(key) + "_" + sigHash(sig);
+        return "remove_" + Long.toHexString(fnv1a(eventFqn + "##" + key.toString() + "##" + sig));
     }
 
     private static String bucketFieldBase(final String eventFqn, final BucketKey key) {
-        return "BUCKET_" + sanitizeFqn(eventFqn) + "_" + hashKey(key);
+        return "BUCKET_" + Long.toHexString(fnv1a(eventFqn + "##" + key.toString()));
     }
 
     private static String hashKey(final BucketKey key) {
