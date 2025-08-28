@@ -25,7 +25,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
     private static final String GEN_PKG = "bot.staro.rokit.generated";
     private static final String BOOTSTRAP = "GeneratedBootstrap";
     private static final String[] PAYLOAD_ACCESSOR_CANDIDATES = new String[] {
-            "getPacket", "getPayload", "getObject", "payload", "get", "value", "getValue", "object", "data"
+            "getPacket", "getPayload", "getObject", "payload", "get", "value",
+            "getValue", "object", "data", "screen", "getScreen", "setting", "getSetting"
     };
 
     private Elements elements;
