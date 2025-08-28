@@ -1,10 +1,9 @@
 package bot.staro.rokit.rokitbus;
 
-import bot.staro.rokit.Event;
-import bot.staro.rokit.Listener;
-import bot.staro.rokit.SingletonEvent;
-import bot.staro.rokit.WrappedEvent;
+import bot.staro.rokit.*;
 import bot.staro.rokit.events.*;
+
+import java.lang.annotation.Annotation;
 
 public final class RokitListener {
     @Listener
@@ -22,8 +21,8 @@ public final class RokitListener {
     }
 
     @Listener
-    public void onString(WrappedEvent<?> event, String string) {
-        System.out.println(string);
+    public void onString(WrappedEvent<String> event) {
+        System.out.println(event.getObject());
     }
 
     @Listener

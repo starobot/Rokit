@@ -1,6 +1,5 @@
 package bot.staro.rokit.processor;
 
-import bot.staro.rokit.processor.binders.GenericPayloadBinder;
 import bot.staro.rokit.spi.ContextualParamBinder;
 import bot.staro.rokit.spi.ParamBinder;
 import bot.staro.rokit.spi.ProviderAwareBinder;
@@ -9,6 +8,7 @@ import com.google.auto.service.AutoService;
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
+import javax.lang.model.type.TypeKind;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
@@ -24,6 +24,9 @@ import java.util.*;
 public final class EventListenerProcessor extends AbstractProcessor {
     private static final String GEN_PKG = "bot.staro.rokit.generated";
     private static final String BOOTSTRAP = "GeneratedBootstrap";
+    private static final String[] PAYLOAD_ACCESSOR_CANDIDATES = new String[] {
+            "getPacket", "getPayload", "getObject", "payload", "get", "value", "getValue", "object", "data"
+    };
 
     private Elements elements;
     private Messager messager;
@@ -68,8 +71,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
             }
         }
-
-        this.paramBinders.add(new GenericPayloadBinder());
     }
 
     @Override
@@ -124,7 +125,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
 
                 final VariableElement eventParam = params.getFirst();
-                final String eventFqn = raw(eventParam.asType().toString());
+                final String eventFqn = eventParam.asType().toString();
 
                 final EventModel event = events.computeIfAbsent(eventFqn, EventModel::new);
 
@@ -332,7 +333,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
             w.write("        final ConcurrentHashMap<Object, java.util.List<Runnable>> removals = new ConcurrentHashMap<>();\n");
             for (final String eventFqn : eventOrder) {
                 final String dispatcherName = dispatcherClassName(eventFqn);
-                w.write("        final " + dispatcherName + ".Store store_" + simpleName(eventFqn) + " = new " + dispatcherName + ".Store();\n");
+                w.write("        final " + dispatcherName + ".Store store_" + sanitizeFqn(eventFqn) + " = new " + dispatcherName + ".Store();\n");
             }
 
             w.write("        boolean addRemoval(final Object subscriber, final Runnable r) {\n");
@@ -348,25 +349,54 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
             w.write("    public static BusState newState() { return new State(); }\n\n");
 
-            w.write("    @SuppressWarnings(\"unchecked\")\n");
+            w.write("    @SuppressWarnings({\"unchecked\", \"rawtypes\"})\n");
             w.write("    public static <E> void dispatch(final RokitEventBus bus, final BusState bs, final E event) {\n");
             if (eventOrder.isEmpty()) {
                 w.write("        return;\n");
             } else {
                 w.write("        final State s = (State) bs;\n");
-                boolean first = true;
-                for (final String fqnEvent : eventOrder) {
-                    final String simple = simpleName(fqnEvent);
-                    w.write("        " + (first ? "if" : "else if") + " (event instanceof " + fqnEvent + ") {\n");
-                    w.write("            Dispatch_" + simple + ".dispatch(bus, s.store_" + simple + ", (" + fqnEvent + ") event);\n");
-                    w.write("            return;\n");
-                    w.write("        }\n");
-                    first = false;
+
+                final Map<String, List<EventModel>> eventsByRawType = new LinkedHashMap<>();
+                for (EventModel em : events.values()) {
+                    eventsByRawType.computeIfAbsent(raw(em.eventFqn), k -> new ArrayList<>()).add(em);
                 }
 
+                boolean first = true;
+                for (Map.Entry<String, List<EventModel>> entry : eventsByRawType.entrySet()) {
+                    final String rawFqn = entry.getKey();
+                    final List<EventModel> specializations = entry.getValue();
+
+                    w.write("        " + (first ? "if" : "else if") + " (event instanceof " + rawFqn + ") {\n");
+                    first = false;
+
+                    if (specializations.size() == 1 && !specializations.getFirst().isGeneric()) {
+                        final EventModel em = specializations.getFirst();
+                        w.write("            " + dispatcherClassName(em.eventFqn) + ".dispatch(bus, s.store_" + sanitizeFqn(em.eventFqn) + ", (" + em.eventFqn + ") event);\n");
+                    } else {
+                        final TypeElement rawElement = elements.getTypeElement(rawFqn);
+                        final ExecutableElement accessor = findPayloadAccessor(rawElement);
+
+                        if (accessor == null) {
+                            error(rawElement, "Cannot dispatch generic event %s: could not find a suitable payload accessor method like getObject() or getPayload() that returns a type variable.", rawFqn);
+                            w.write("            // ERROR: No payload accessor found for " + rawFqn + "\n");
+                            w.write("        }\n");
+                            continue;
+                        }
+
+                        w.write("            final " + rawFqn + " typedEvent = (" + rawFqn + ") event;\n");
+                        w.write("            final Object payload = typedEvent." + accessor.getSimpleName() + "();\n");
+
+                        for (EventModel em : specializations) {
+                            w.write("            if (payload instanceof " + em.getGenericArgumentFqn() + ") {\n");
+                            w.write("                " + dispatcherClassName(em.eventFqn) + ".dispatch(bus, s.store_" + sanitizeFqn(em.eventFqn) + ", typedEvent);\n");
+                            w.write("            }\n");
+                        }
+                    }
+                    w.write("            return;\n");
+                    w.write("        }\n");
+                }
                 w.write("        else { return; }\n");
             }
-
             w.write("    }\n\n");
 
             w.write("    public static void register(final RokitEventBus bus, final BusState bs, final Object subscriber) {\n");
@@ -378,7 +408,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 firstOwner = false;
                 for (final Map.Entry<String, EventModel> eventEntry : events.entrySet()) {
                     final String eventFqn = eventEntry.getKey();
-                    final String simple = simpleName(eventFqn);
                     final EventModel em = eventEntry.getValue();
                     final List<BucketKey> keys = em.orderedBucketKeys();
 
@@ -390,17 +419,17 @@ public final class EventListenerProcessor extends AbstractProcessor {
                             }
 
                             final long sid = stableId(lm.ownerFqn, lm.methodName, lm.eventFqn, lm.signatureKey);
-                            final String dispatcher = "Dispatch_" + simple;
+                            final String dispatcher = dispatcherClassName(eventFqn);
                             final String invokerInterface = dispatcherInvokerInterfaceName(lm.eventFqn, lm.signatureKey);
                             final String addMethod = dispatcherAddMethodName(lm.eventFqn, bk, lm.signatureKey);
                             final String args = buildInvokerArgs(lm.paramPlans);
                             w.write("            {\n");
                             w.write("                final " + dispatcher + "." + invokerInterface + " adapter = new " + dispatcher + "." + invokerInterface + "() {\n");
-                            w.write("                    @Override public void invoke(final " + lm.eventFqn + " event" + renderSignatureParams(lm.paramPlans) + ") {\n");
+                            w.write("                    @Override public void invoke(final " + raw(lm.eventFqn) + " event" + renderSignatureParams(lm.paramPlans) + ") {\n");
                             w.write("                        listenerInstance." + lm.methodName + "(event" + args + ");\n");
                             w.write("                    }\n");
                             w.write("                };\n");
-                            w.write("                final Runnable removal = " + dispatcher + "." + addMethod + "(bus, s.store_" + simple + ", listenerInstance, " + lm.priority + ", " + sid + "L, adapter);\n");
+                            w.write("                final Runnable removal = " + dispatcher + "." + addMethod + "(bus, s.store_" + sanitizeFqn(eventFqn) + ", listenerInstance, " + lm.priority + ", " + sid + "L, adapter);\n");
                             w.write("                s.addRemoval(subscriber, removal);\n");
                             w.write("            }\n");
                         }
@@ -439,8 +468,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
                                      final EventModel em,
                                      final LinkedHashMap<String, String> providerDeclTypes,
                                      final Map<String, Integer> providerIds) throws IOException {
-        final String simple = simpleName(em.eventFqn);
-        final String className = "Dispatch_" + simple;
+        final String className = dispatcherClassName(em.eventFqn);
         w.write("    static final class " + className + " {\n");
         w.write("        static final class Store { \n");
 
@@ -448,7 +476,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
         for (final BucketKey key : keys) {
             final String sig = key.signatureKey;
             final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
-            final String baseName = bucketFieldBase(simple, key);
+            final String baseName = bucketFieldBase(em.eventFqn, key);
             w.write("            volatile " + iface + "[] " + baseName + " = null;\n");
             w.write("            volatile int[] " + baseName + "_P = null;\n");
             w.write("            volatile long[] " + baseName + "_I = null;\n");
@@ -460,7 +488,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
         Collections.sort(signatures);
         for (final String sig : signatures) {
             final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
-            w.write("        interface " + iface + " { void invoke(final " + em.eventFqn + " event" + renderSignatureParamDecls(sig) + "); }\n");
+            w.write("        interface " + iface + " { void invoke(final " + raw(em.eventFqn) + " event" + renderSignatureParamDecls(sig) + "); }\n");
         }
 
         w.write("\n");
@@ -468,7 +496,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
         for (final BucketKey key : keys) {
             final String sig = key.signatureKey;
             final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
-            final String baseName = bucketFieldBase(simple, key);
+            final String baseName = bucketFieldBase(em.eventFqn, key);
             final String addName = dispatcherAddMethodName(em.eventFqn, key, sig);
             final String removeName = dispatcherRemoveMethodName(em.eventFqn, key, sig);
 
@@ -545,7 +573,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
         w.write("            return lo;\n");
         w.write("        }\n\n");
 
-        w.write("        static void dispatch(final RokitEventBus bus, final Store store, final " + em.eventFqn + " event) {\n");
+        w.write("        static void dispatch(final RokitEventBus bus, final Store store, final " + raw(em.eventFqn) + " event) {\n");
 
         final Map<String, List<BucketKey>> byCond = new LinkedHashMap<>();
         for (final BucketKey bk : keys) {
@@ -598,7 +626,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
             for (final BucketKey bk : group) {
                 final String sig = bk.signatureKey;
                 final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
-                final String baseName = bucketFieldBase(simple, bk);
+                final String baseName = bucketFieldBase(em.eventFqn, bk);
                 w.write("                {\n");
                 w.write("                    final " + iface + "[] local = store." + baseName + ";\n");
                 w.write("                    if (local != null) {\n");
@@ -616,16 +644,40 @@ public final class EventListenerProcessor extends AbstractProcessor {
         w.write("    }\n");
     }
 
+    private boolean isCandidateName(final String name) {
+        for (final String candidate : PAYLOAD_ACCESSOR_CANDIDATES) {
+            if (candidate.equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ExecutableElement findPayloadAccessor(final TypeElement eventElement) {
+        for (final Element member : elements.getAllMembers(eventElement)) {
+            if (member.getKind() != ElementKind.METHOD || !(member instanceof ExecutableElement accessor)) {
+                continue;
+            }
+            if (!isCandidateName(accessor.getSimpleName().toString()) || !accessor.getModifiers().contains(Modifier.PUBLIC) || !accessor.getParameters().isEmpty()) {
+                continue;
+            }
+            if (accessor.getReturnType().getKind() == TypeKind.TYPEVAR) {
+                return accessor;
+            }
+        }
+        return null;
+    }
+
     private static String sanitizeFqn(final String fqn) {
-        return fqn.replace('.', '_').replace('$', '_');
+        return fqn.replace('.', '_').replace('$', '_').replace('<', '_').replace('>', '_').replace(',', '_');
     }
 
     private static String dispatcherClassName(final String eventFqn) {
-        return "Dispatch_" + simpleName(eventFqn);
+        return "Dispatch_" + sanitizeFqn(eventFqn);
     }
 
     private static String dispatcherInvokerInterfaceName(final String eventFqn, final String signatureKey) {
-        final String sanitizedFqn = sanitizeFqn(simpleName(eventFqn));
+        final String sanitizedFqn = sanitizeFqn(eventFqn);
         if (signatureKey.isEmpty()) {
             return "Invoker_" + sanitizedFqn + "__";
         }
@@ -634,15 +686,15 @@ public final class EventListenerProcessor extends AbstractProcessor {
     }
 
     private static String dispatcherAddMethodName(final String eventFqn, final BucketKey key, final String sig) {
-        return "add_" + sanitizeFqn(simpleName(eventFqn)) + "_" + hashKey(key) + "_" + sigHash(sig);
+        return "add_" + sanitizeFqn(eventFqn) + "_" + hashKey(key) + "_" + sigHash(sig);
     }
 
     private static String dispatcherRemoveMethodName(final String eventFqn, final BucketKey key, final String sig) {
-        return "remove_" + sanitizeFqn(simpleName(eventFqn)) + "_" + hashKey(key) + "_" + sigHash(sig);
+        return "remove_" + sanitizeFqn(eventFqn) + "_" + hashKey(key) + "_" + sigHash(sig);
     }
 
-    private static String bucketFieldBase(final String eventSimpleName, final BucketKey key) {
-        return "BUCKET_" + sanitizeFqn(eventSimpleName) + "_" + hashKey(key);
+    private static String bucketFieldBase(final String eventFqn, final BucketKey key) {
+        return "BUCKET_" + sanitizeFqn(eventFqn) + "_" + hashKey(key);
     }
 
     private static String hashKey(final BucketKey key) {
@@ -858,6 +910,19 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
         EventModel(final String eventFqn) {
             this.eventFqn = eventFqn;
+        }
+
+        boolean isGeneric() {
+            return eventFqn.indexOf('<') >= 0;
+        }
+
+        String getGenericArgumentFqn() {
+            final int start = eventFqn.indexOf('<');
+            final int end = eventFqn.lastIndexOf('>');
+            if (start >= 0 && end > start) {
+                return eventFqn.substring(start + 1, end);
+            }
+            return "java.lang.Object";
         }
 
         void registerGuard(final String name, final String declaredType) {

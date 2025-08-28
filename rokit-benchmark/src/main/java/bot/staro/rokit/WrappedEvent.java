@@ -1,6 +1,6 @@
 package bot.staro.rokit;
 
-public final class WrappedEvent<E extends String> {
+public final class WrappedEvent<E> {
     private final E object;
 
     public WrappedEvent(E object) {
