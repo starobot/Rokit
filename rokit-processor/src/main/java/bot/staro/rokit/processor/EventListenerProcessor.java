@@ -578,6 +578,21 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
         w.write("        static void dispatch(final RokitEventBus bus, final Store store, final " + raw(em.eventFqn) + " event) {\n");
 
+        final Set<String> allGuardsForEvent = new LinkedHashSet<>();
+        for (final List<ListenerModel> bucket : em.buckets.values()) {
+            for (final ListenerModel listener : bucket) {
+                for (final ParamPlan plan : listener.paramPlans) {
+                    allGuardsForEvent.addAll(plan.guardBits);
+                }
+            }
+        }
+
+        for (final String g : allGuardsForEvent) {
+            final String type = em.guardDeclaredTypes.get(g);
+            final String constName = sanitizeUpper(g);
+            w.write("            final " + type + " " + sanitizeLower(g) + " = " + genPkg + ".ProviderKeys." + constName + " >= 0 ? bus.<" + type + ">getProvider(" + genPkg + ".ProviderKeys." + constName + ") : null;\n");
+        }
+
         final Map<String, List<BucketKey>> byCond = new LinkedHashMap<>();
         for (final BucketKey bk : keys) {
             byCond.computeIfAbsent(bk.conditionKey, k -> new ArrayList<>()).add(bk);
@@ -587,20 +602,10 @@ public final class EventListenerProcessor extends AbstractProcessor {
             final String condKey = entry.getKey();
             final List<BucketKey> group = entry.getValue();
 
-            final Set<String> guardsInGroup = new LinkedHashSet<>();
             final Set<String> localsInGroup = new LinkedHashSet<>();
             for (final BucketKey bk : group) {
-                final int gi = bk.conditionKey.indexOf("G:");
                 final int xi = bk.conditionKey.indexOf(";X:");
-                final String guardsCsv = gi >= 0 && xi > gi ? bk.conditionKey.substring(gi + 2, xi) : "";
                 final String extsCsv = xi >= 0 ? bk.conditionKey.substring(xi + 3) : "";
-                if (!guardsCsv.isEmpty()) {
-                    for (final String g : guardsCsv.split(",")) {
-                        if (!g.isEmpty()) {
-                            guardsInGroup.add(g);
-                        }
-                    }
-                }
                 if (!extsCsv.isEmpty()) {
                     for (final String x : extsCsv.split(",")) {
                         if (!x.isEmpty()) {
@@ -608,12 +613,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                         }
                     }
                 }
-            }
-
-            for (final String g : guardsInGroup) {
-                final String type = em.guardDeclaredTypes.get(g);
-                final String constName = sanitizeUpper(g);
-                w.write("            final " + type + " " + sanitizeLower(g) + " = " + genPkg + ".ProviderKeys." + constName + " >= 0 ? bus.<" + type + ">getProvider(" + genPkg + ".ProviderKeys." + constName + ") : null;\n");
             }
 
             for (final String local : localsInGroup) {
@@ -899,7 +898,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
                 }
             }
         }
-
         return null; // Should not happen
     }
 
