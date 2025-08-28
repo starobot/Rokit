@@ -46,8 +46,27 @@ public final class EventListenerProcessor extends AbstractProcessor {
         }
 
         this.paramBinders = new ArrayList<>();
-        for (var b : ServiceLoader.load(ParamBinder.class, getClass().getClassLoader())) {
-            this.paramBinders.add(b);
+        try {
+            for (var b : ServiceLoader.load(ParamBinder.class, getClass().getClassLoader())) {
+                this.paramBinders.add(b);
+            }
+        } catch (final Exception ex) {
+            messager.printMessage(Diagnostic.Kind.WARNING, "Rokit ServiceLoader failed: " + ex);
+        }
+
+        final String extraBinders = environment.getOptions().get("rokit.extraBinders");
+        if (extraBinders != null && !extraBinders.isBlank()) {
+            for (final String binderClassName : extraBinders.split(",")) {
+                final String trimmed = binderClassName.trim();
+                if (trimmed.isEmpty()) continue;
+                try {
+                    final Class<?> binderClass = Class.forName(trimmed);
+                    final ParamBinder binderInstance = (ParamBinder) binderClass.getConstructor().newInstance();
+                    this.paramBinders.add(binderInstance);
+                } catch (final Exception ex) {
+                    error(null, "Failed to manually load binder '%s': %s", trimmed, ex);
+                }
+            }
         }
 
         this.paramBinders.add(new GenericPayloadBinder());
@@ -312,8 +331,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
             w.write("    private static final class State implements BusState {\n");
             w.write("        final ConcurrentHashMap<Object, java.util.List<Runnable>> removals = new ConcurrentHashMap<>();\n");
             for (final String eventFqn : eventOrder) {
-                final String simple = simpleName(eventFqn);
-                w.write("        final Dispatch_" + simple + ".Store store_" + simple + " = new Dispatch_" + simple + ".Store();\n");
+                final String dispatcherName = dispatcherClassName(eventFqn);
+                w.write("        final " + dispatcherName + ".Store store_" + simpleName(eventFqn) + " = new " + dispatcherName + ".Store();\n");
             }
 
             w.write("        boolean addRemoval(final Object subscriber, final Runnable r) {\n");
@@ -415,8 +434,6 @@ public final class EventListenerProcessor extends AbstractProcessor {
             w.write("}\n");
         }
     }
-
-
 
     private void emitEventDispatcher(final Writer w,
                                      final EventModel em,
@@ -599,26 +616,33 @@ public final class EventListenerProcessor extends AbstractProcessor {
         w.write("    }\n");
     }
 
+    private static String sanitizeFqn(final String fqn) {
+        return fqn.replace('.', '_').replace('$', '_');
+    }
+
+    private static String dispatcherClassName(final String eventFqn) {
+        return "Dispatch_" + simpleName(eventFqn);
+    }
+
     private static String dispatcherInvokerInterfaceName(final String eventFqn, final String signatureKey) {
-        final String simple = simpleName(eventFqn);
+        final String sanitizedFqn = sanitizeFqn(simpleName(eventFqn));
         if (signatureKey.isEmpty()) {
-            return "Invoker_" + simple + "__";
+            return "Invoker_" + sanitizedFqn + "__";
         }
-        return "Invoker_" + simple + "__" + signatureKey.replace('.', '_').replace('|', '_').replace('$', '_');
+
+        return "Invoker_" + sanitizedFqn + "__" + signatureKey.replace('.', '_').replace('|', '_').replace('$', '_');
     }
 
     private static String dispatcherAddMethodName(final String eventFqn, final BucketKey key, final String sig) {
-        final String simple = simpleName(eventFqn);
-        return "add_" + simple + "_" + hashKey(key) + "_" + sigHash(sig);
+        return "add_" + sanitizeFqn(simpleName(eventFqn)) + "_" + hashKey(key) + "_" + sigHash(sig);
     }
 
     private static String dispatcherRemoveMethodName(final String eventFqn, final BucketKey key, final String sig) {
-        final String simple = simpleName(eventFqn);
-        return "remove_" + simple + "_" + hashKey(key) + "_" + sigHash(sig);
+        return "remove_" + sanitizeFqn(simpleName(eventFqn)) + "_" + hashKey(key) + "_" + sigHash(sig);
     }
 
-    private static String bucketFieldBase(final String simpleEvent, final BucketKey key) {
-        return "BUCKET_" + simpleEvent + "_" + hashKey(key);
+    private static String bucketFieldBase(final String eventSimpleName, final BucketKey key) {
+        return "BUCKET_" + sanitizeFqn(eventSimpleName) + "_" + hashKey(key);
     }
 
     private static String hashKey(final BucketKey key) {
