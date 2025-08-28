@@ -620,8 +620,9 @@ public final class EventListenerProcessor extends AbstractProcessor {
             w.write("                    final " + iface + "[] local = store." + baseName + ";\n");
             w.write("                    if (local != null) {\n");
             w.write("                        for (int index = 0; index < local.length; index++) {\n");
-            w.write("                             if (local[index] != null && store." + baseName + "_I[index] == " + stableId(listener.ownerFqn, listener.methodName, listener.eventFqn, listener.signatureKey) + "L) {\n");
+            w.write("                             if (store." + baseName + "_I[index] == " + stableId(listener.ownerFqn, listener.methodName, listener.eventFqn, listener.signatureKey) + "L) {\n");
             w.write("                                 local[index].invoke(event" + invokeArgs + ");\n");
+            w.write("                                 break;\n");
             w.write("                             }\n");
             w.write("                        }\n");
             w.write("                    }\n");
