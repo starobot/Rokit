@@ -579,10 +579,14 @@ public final class EventListenerProcessor extends AbstractProcessor {
         w.write("        static void dispatch(final RokitEventBus bus, final Store store, final " + raw(em.eventFqn) + " event) {\n");
 
         final Set<String> allGuardsForEvent = new LinkedHashSet<>();
+        final Set<String> allExtractorsForEvent = new LinkedHashSet<>();
         for (final List<ListenerModel> bucket : em.buckets.values()) {
             for (final ListenerModel listener : bucket) {
                 for (final ParamPlan plan : listener.paramPlans) {
                     allGuardsForEvent.addAll(plan.guardBits);
+                    for (final ParamBinder.Extractor ex : plan.extractors) {
+                        allExtractorsForEvent.add(ex.localName());
+                    }
                 }
             }
         }
@@ -592,35 +596,34 @@ public final class EventListenerProcessor extends AbstractProcessor {
             final String constName = sanitizeUpper(g);
             w.write("            final " + type + " " + sanitizeLower(g) + " = " + genPkg + ".ProviderKeys." + constName + " >= 0 ? bus.<" + type + ">getProvider(" + genPkg + ".ProviderKeys." + constName + ") : null;\n");
         }
+        for (final String local : allExtractorsForEvent) {
+            final ExtractorModel ex = em.extractors.get(local);
+            if (ex != null) {
+                w.write("            final " + ex.declaredType + " " + ex.localName + " = " + ex.initExpression + ";\n");
+            }
+        }
 
         final Map<String, List<BucketKey>> byCond = new LinkedHashMap<>();
         for (final BucketKey bk : keys) {
             byCond.computeIfAbsent(bk.conditionKey, k -> new ArrayList<>()).add(bk);
         }
 
-        for (final Map.Entry<String, List<BucketKey>> entry : byCond.entrySet()) {
+        List<Map.Entry<String, List<BucketKey>>> sortedEntries = new ArrayList<>(byCond.entrySet());
+        sortedEntries.sort((e1, e2) -> {
+            int maxPriority1 = e1.getValue().stream()
+                    .flatMap(bk -> em.buckets.get(bk).stream())
+                    .mapToInt(ListenerModel::priority)
+                    .max().orElse(Integer.MIN_VALUE);
+            int maxPriority2 = e2.getValue().stream()
+                    .flatMap(bk -> em.buckets.get(bk).stream())
+                    .mapToInt(ListenerModel::priority)
+                    .max().orElse(Integer.MIN_VALUE);
+            return Integer.compare(maxPriority2, maxPriority1);
+        });
+
+        for (final Map.Entry<String, List<BucketKey>> entry : sortedEntries) {
             final String condKey = entry.getKey();
             final List<BucketKey> group = entry.getValue();
-
-            final Set<String> localsInGroup = new LinkedHashSet<>();
-            for (final BucketKey bk : group) {
-                final int xi = bk.conditionKey.indexOf(";X:");
-                final String extsCsv = xi >= 0 ? bk.conditionKey.substring(xi + 3) : "";
-                if (!extsCsv.isEmpty()) {
-                    for (final String x : extsCsv.split(",")) {
-                        if (!x.isEmpty()) {
-                            localsInGroup.add(x);
-                        }
-                    }
-                }
-            }
-
-            for (final String local : localsInGroup) {
-                final ExtractorModel ex = em.extractors.get(local);
-                if (ex != null) {
-                    w.write("            final " + ex.declaredType + " " + ex.localName + " = " + ex.initExpression + ";\n");
-                }
-            }
 
             final String condExpr = renderCondition(new BucketKey(condKey, ""), em.guardDeclaredTypes.keySet(), em.extractors.keySet());
             w.write("            " + (condExpr.isEmpty() ? "" : "if (" + condExpr + ") ") + "{\n");
