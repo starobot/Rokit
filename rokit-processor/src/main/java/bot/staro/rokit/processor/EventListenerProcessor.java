@@ -10,6 +10,7 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
@@ -426,7 +427,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
                             final String args = buildInvokerArgs(lm.paramPlans);
                             w.write("            {\n");
                             w.write("                final " + dispatcher + "." + invokerInterface + " adapter = new " + dispatcher + "." + invokerInterface + "() {\n");
-                            w.write("                    @Override public void invoke(final " + raw(lm.eventFqn) + " event" + renderSignatureParams(lm.paramPlans) + ") {\n");
+                            w.write("                    @Override public void invoke(final " + raw(lm.eventFqn) + " event" + buildParamDeclsFromPlans(lm.paramPlans) + ") {\n");
                             w.write("                        listenerInstance." + lm.methodName + "((" + lm.eventFqn + ")event" + args + ");\n");
                             w.write("                    }\n");
                             w.write("                };\n");
@@ -489,7 +490,8 @@ public final class EventListenerProcessor extends AbstractProcessor {
         Collections.sort(signatures);
         for (final String sig : signatures) {
             final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
-            w.write("        interface " + iface + " { void invoke(final " + raw(em.eventFqn) + " event" + renderSignatureParamDecls(sig) + "); }\n");
+            final ListenerModel representative = findListenerBySignature(em, sig);
+            w.write("        interface " + iface + " { void invoke(final " + raw(em.eventFqn) + " event" + buildParamDeclsFromPlans(representative.paramPlans) + "); }\n");
         }
 
         w.write("\n");
@@ -626,13 +628,15 @@ public final class EventListenerProcessor extends AbstractProcessor {
 
             for (final BucketKey bk : group) {
                 final String sig = bk.signatureKey;
+                final ListenerModel representative = em.buckets.get(bk).getFirst();
+                final String invokeArgs = buildInvokerArgs(representative.paramPlans);
                 final String iface = dispatcherInvokerInterfaceName(em.eventFqn, sig);
                 final String baseName = bucketFieldBase(em.eventFqn, bk);
                 w.write("                {\n");
                 w.write("                    final " + iface + "[] local = store." + baseName + ";\n");
                 w.write("                    if (local != null) {\n");
                 w.write("                        for (int index = 0; index < local.length; index++) {\n");
-                w.write("                            local[index].invoke(event" + renderSignatureArgs(sig) + ");\n");
+                w.write("                            local[index].invoke(event" + invokeArgs + ");\n");
                 w.write("                        }\n");
                 w.write("                    }\n");
                 w.write("                }\n");
@@ -677,12 +681,12 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return null;
     }
 
-    private boolean isOrContainsTypeVar(javax.lang.model.type.TypeMirror type) {
+    private boolean isOrContainsTypeVar(TypeMirror type) {
         if (type.getKind() == TypeKind.TYPEVAR) {
             return true;
         }
         if (type instanceof DeclaredType) {
-            for (javax.lang.model.type.TypeMirror typeArgument : ((DeclaredType) type).getTypeArguments()) {
+            for (TypeMirror typeArgument : ((DeclaredType) type).getTypeArguments()) {
                 if (isOrContainsTypeVar(typeArgument)) {
                     return true;
                 }
@@ -738,21 +742,14 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return h;
     }
 
-    private static String renderSignatureParamDecls(final String signatureKey) {
-        if (signatureKey.isEmpty()) {
+    private static String buildParamDeclsFromPlans(final List<ParamPlan> plans) {
+        if (plans.isEmpty()) {
             return "";
         }
-
         final StringBuilder sb = new StringBuilder();
-        final Map<String, Integer> seen = new HashMap<>();
-        for (final String p : signatureKey.split("\\|")) {
-            final String base = sanitizeLower(simpleName(p));
-            final int c = seen.getOrDefault(base, 0);
-            seen.put(base, c + 1);
-            final String name = (c == 0) ? base : (base + c);
-            sb.append(", ").append(p).append(' ').append(name);
+        for (final ParamPlan p : plans) {
+            sb.append(", final ").append(p.declaredType).append(" ").append(p.argExpr);
         }
-
         return sb.toString();
     }
 
@@ -770,37 +767,17 @@ public final class EventListenerProcessor extends AbstractProcessor {
         return sb.toString();
     }
 
-    private static String renderSignatureArgs(final String sig) {
-        if (sig.isEmpty()) {
-            return "";
-        }
-
-        final StringBuilder sb = new StringBuilder();
-        final Map<String, Integer> seen = new HashMap<>();
-        for (final String p : sig.split("\\|")) {
-            final String base = sanitizeLower(simpleName(p));
-            final int c = seen.getOrDefault(base, 0);
-            seen.put(base, c + 1);
-            final String name = (c == 0) ? base : (base + c);
-            sb.append(", ").append(name);
-        }
-
-        return sb.toString();
-    }
-
-
     private static String buildInvokerArgs(final List<ParamPlan> plans) {
         if (plans.isEmpty()) {
             return "";
         }
-
         final StringBuilder sb = new StringBuilder();
         for (final ParamPlan p : plans) {
             sb.append(", ").append(p.argExpr);
         }
-
         return sb.toString();
     }
+
 
     private static String renderCondition(final BucketKey key, final Set<String> allGuards, final Set<String> allExtractors) {
         final int gi = key.conditionKey.indexOf("G:");
@@ -912,6 +889,18 @@ public final class EventListenerProcessor extends AbstractProcessor {
         }
 
         return new ArrayList<>(owners);
+    }
+
+    private ListenerModel findListenerBySignature(EventModel em, String signature) {
+        for (List<ListenerModel> bucket : em.buckets.values()) {
+            for (ListenerModel listener : bucket) {
+                if (listener.signatureKey.equals(signature)) {
+                    return listener;
+                }
+            }
+        }
+
+        return null; // Should not happen
     }
 
     private record MethodInfo(TypeElement annotation, ExecutableElement method) {}
