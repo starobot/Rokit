@@ -8,7 +8,9 @@ import com.google.auto.service.AutoService;
 import javax.annotation.processing.*;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.*;
+import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
@@ -25,8 +27,9 @@ public final class EventListenerProcessor extends AbstractProcessor {
     private static final String GEN_PKG = "bot.staro.rokit.generated";
     private static final String BOOTSTRAP = "GeneratedBootstrap";
     private static final String[] PAYLOAD_ACCESSOR_CANDIDATES = new String[] {
-            "getPacket", "getPayload", "getObject", "payload", "get", "value",
-            "getValue", "object", "data", "screen", "getScreen", "setting", "getSetting"
+            "packet", "getPacket", "getPayload", "getObject", "payload", "get",
+            "value", "getValue", "object", "data", "setting", "getSetting", "screen", "getScreen",
+            "module", "getModule"
     };
 
     private Elements elements;
@@ -427,7 +430,7 @@ public final class EventListenerProcessor extends AbstractProcessor {
                             w.write("            {\n");
                             w.write("                final " + dispatcher + "." + invokerInterface + " adapter = new " + dispatcher + "." + invokerInterface + "() {\n");
                             w.write("                    @Override public void invoke(final " + raw(lm.eventFqn) + " event" + renderSignatureParams(lm.paramPlans) + ") {\n");
-                            w.write("                        listenerInstance." + lm.methodName + "(event" + args + ");\n");
+                            w.write("                        listenerInstance." + lm.methodName + "((" + lm.eventFqn + ")event" + args + ");\n");
                             w.write("                    }\n");
                             w.write("                };\n");
                             w.write("                final Runnable removal = " + dispatcher + "." + addMethod + "(bus, s.store_" + sanitizeFqn(eventFqn) + ", listenerInstance, " + lm.priority + ", " + sid + "L, adapter);\n");
@@ -655,6 +658,14 @@ public final class EventListenerProcessor extends AbstractProcessor {
     }
 
     private ExecutableElement findPayloadAccessor(final TypeElement eventElement) {
+        if (eventElement.getKind() == ElementKind.RECORD) {
+            for (RecordComponentElement component : eventElement.getRecordComponents()) {
+                if (component.asType().getKind() == TypeKind.TYPEVAR) {
+                    return component.getAccessor();
+                }
+            }
+        }
+
         for (final Element member : elements.getAllMembers(eventElement)) {
             if (member.getKind() != ElementKind.METHOD || !(member instanceof ExecutableElement accessor)) {
                 continue;
@@ -670,7 +681,13 @@ public final class EventListenerProcessor extends AbstractProcessor {
     }
 
     private static String sanitizeFqn(final String fqn) {
-        return fqn.replace('.', '_').replace('$', '_').replace('<', '_').replace('>', '_').replace(',', '_');
+        return fqn.replace('.', '_')
+                .replace('$', '_')
+                .replace('<', '_')
+                .replace('>', '_')
+                .replace(',', '_')
+                .replace('?', 'W')
+                .replace(' ', '_');
     }
 
     private static String dispatcherClassName(final String eventFqn) {
