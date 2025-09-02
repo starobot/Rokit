@@ -7,6 +7,8 @@
 > [!CAUTION]
 > Beta – the API is mostly stable, but minor breaking changes are still possible.
 
+# readme is outdated
+
 ---
 TODO: private access methods invocation!!!
 
